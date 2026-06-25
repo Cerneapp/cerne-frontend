@@ -142,6 +142,8 @@ export default function CerneApp() {
   const [createMediaType, setCreateMediaType] = useState('image');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState('');
@@ -505,6 +507,7 @@ export default function CerneApp() {
     try {
       await apiFetch(`/matches/${matchId}/messages`, { method: 'POST', body: JSON.stringify({ senderId: userId, text: '', sharedPulseId: pulse.id }) }, token);
       setSharingPulse(null);
+      showToast('Enviado!');
     } catch (err) {
       setFeedError('Não foi possível compartilhar: ' + err.message);
     }
@@ -548,6 +551,7 @@ export default function CerneApp() {
       await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: pulse.mediaUrl, mediaType: pulse.mediaType }) }, token);
       await loadStories();
       setSharingPulse(null);
+      showToast('Reel adicionado aos seus momentos!');
     } catch (err) {
       setFeedError('Não foi possível adicionar ao momento: ' + err.message);
     }
@@ -780,6 +784,12 @@ export default function CerneApp() {
     uploadCapturedBlob(file, file.name);
   }
 
+  function showToast(message) {
+    clearTimeout(toastTimerRef.current);
+    setToast(message);
+    toastTimerRef.current = setTimeout(() => setToast(''), 5000);
+  }
+
   async function publishFromCreator() {
     if (!createImageUrl || publishing) return;
     if (creatorMode !== 'momento' && !createText.trim()) return;
@@ -788,6 +798,7 @@ export default function CerneApp() {
       if (creatorMode === 'momento') {
         await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: createImageUrl, mediaType: createMediaType }) }, token);
         await loadStories();
+        showToast('Momento publicado!');
       } else {
         await apiFetch(
           '/pulses',
@@ -795,6 +806,7 @@ export default function CerneApp() {
           token
         );
         await loadFeed();
+        showToast(creatorMode === 'reel' ? 'Reel publicado!' : 'Pulse publicado!');
       }
       closeCreator();
     } catch (err) {
@@ -865,6 +877,7 @@ export default function CerneApp() {
       setViewingStoryGroup(null);
       setStoryMenuOpen(false);
       await loadStories();
+      showToast('Momento apagado.');
     } catch (err) {
       setStoryActionError(err.message || 'Não foi possível apagar o momento.');
     }
@@ -899,6 +912,7 @@ export default function CerneApp() {
     try {
       await apiFetch(`/pulses/${id}?userId=${userId}`, { method: 'DELETE' }, token);
       setPulses((prev) => prev.filter((p) => p.id !== id));
+      showToast('Pulse apagado.');
     } catch (err) {
       setFeedError(`Não foi possível apagar o pulse: ${err.message}`);
     }
@@ -1292,6 +1306,11 @@ export default function CerneApp() {
 
   return (
     <div className="max-w-sm mx-auto h-[700px] bg-white rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans">
+      {toast && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs font-medium px-4 py-2 rounded-full z-50 whitespace-nowrap">
+          {toast}
+        </div>
+      )}
       {!(tab === 'chat' && activeConvo) && (
         <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-gray-100">
           {tab === 'feed' && (
