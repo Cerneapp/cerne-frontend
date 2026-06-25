@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical, RefreshCw, Image as ImageIcon, Share2, Link as LinkIcon, Download
+  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical, RefreshCw, Image as ImageIcon, Share2, Link as LinkIcon, Download, Settings
 } from 'lucide-react';
 
 const API_URL = 'https://cerne-backend.onrender.com';
@@ -118,7 +118,7 @@ export default function CerneApp() {
   const [userId, setUserId] = useState(null);
 
   const [obStep, setObStep] = useState(0);
-  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos' });
+  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos', invisibleMode: false });
 
   const [tab, setTab] = useState('feed');
   const [pulses, setPulses] = useState([]);
@@ -179,6 +179,10 @@ export default function CerneApp() {
   const [shareCopied, setShareCopied] = useState(false);
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState([]);
   const [interests, setInterests] = useState([]);
 
   // Tenta recuperar sessão salva ao abrir o app
@@ -211,6 +215,7 @@ export default function CerneApp() {
         bio: user.bio || '',
         interests: user.interests.map((i) => i.interest.name),
         intent: user.intent,
+        invisibleMode: user.invisibleMode,
       });
       setScreen('app');
       await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests()]);
@@ -224,7 +229,7 @@ export default function CerneApp() {
   async function loadFeed(uid = userId, tok = token) {
     try {
       setFeedError('');
-      const raw = await apiFetch('/pulses', {}, tok);
+      const raw = await apiFetch(`/pulses?viewerId=${uid}`, {}, tok);
       setPulses(
         raw.map((p) => ({
           id: p.id,
@@ -438,6 +443,60 @@ export default function CerneApp() {
       setViewingProfile(null);
     } finally {
       setViewingProfileLoading(false);
+    }
+  }
+
+  async function blockUser(targetId) {
+    try {
+      await apiFetch(`/users/${targetId}/block`, { method: 'POST', body: JSON.stringify({ blockerId: userId }) }, token);
+      setProfileMenuOpen(false);
+      setViewingProfile(null);
+      await Promise.all([loadFeed(), loadStories()]);
+      showToast('Pessoa bloqueada.');
+    } catch (err) {
+      setFeedError('Não foi possível bloquear: ' + err.message);
+    }
+  }
+
+  async function unblockUser(targetId) {
+    try {
+      await apiFetch(`/users/${targetId}/unblock`, { method: 'POST', body: JSON.stringify({ blockerId: userId }) }, token);
+      setBlockedUsers((prev) => prev.filter((u) => u.id !== targetId));
+      await Promise.all([loadFeed(), loadStories()]);
+      showToast('Pessoa desbloqueada.');
+    } catch (err) {
+      setFeedError('Não foi possível desbloquear: ' + err.message);
+    }
+  }
+
+  async function submitReport(targetId, reason) {
+    try {
+      await apiFetch(`/users/${targetId}/report`, { method: 'POST', body: JSON.stringify({ reporterId: userId, reason }) }, token);
+      setReportTarget(null);
+      setProfileMenuOpen(false);
+      showToast('Denúncia enviada.');
+    } catch (err) {
+      setFeedError('Não foi possível denunciar: ' + err.message);
+    }
+  }
+
+  async function openSettings() {
+    setSettingsOpen(true);
+    try {
+      const list = await apiFetch(`/users/blocked-list?userId=${userId}`, {}, token);
+      setBlockedUsers(list);
+    } catch (err) {
+      setBlockedUsers([]);
+    }
+  }
+
+  async function toggleInvisibleMode() {
+    const next = !profile.invisibleMode;
+    try {
+      await apiFetch(`/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ invisibleMode: next }) }, token);
+      setProfile((p) => ({ ...p, invisibleMode: next }));
+    } catch (err) {
+      setFeedError('Não foi possível atualizar o modo invisível.');
     }
   }
 
@@ -1331,7 +1390,10 @@ export default function CerneApp() {
           {tab === 'profile' && (
             <>
               <span className="text-base font-medium">Perfil</span>
-              <LogOut className="w-[18px] h-[18px] text-gray-400 cursor-pointer" onClick={logout} />
+              <div className="flex items-center gap-3">
+                <Settings className="w-[18px] h-[18px] text-gray-400 cursor-pointer" onClick={openSettings} />
+                <LogOut className="w-[18px] h-[18px] text-gray-400 cursor-pointer" onClick={logout} />
+              </div>
             </>
           )}
         </div>
@@ -1975,9 +2037,14 @@ export default function CerneApp() {
 
       {viewingProfile && (
         <div className="absolute inset-0 bg-white flex flex-col">
-          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
-            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setViewingProfile(null)} />
-            <span className="text-sm font-medium">{viewingProfile.loading ? '...' : viewingProfile.name}</span>
+          <div className="flex items-center justify-between gap-3 p-4 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setViewingProfile(null)} />
+              <span className="text-sm font-medium">{viewingProfile.loading ? '...' : viewingProfile.name}</span>
+            </div>
+            {!viewingProfile.loading && (
+              <MoreVertical className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => setProfileMenuOpen(true)} />
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             {viewingProfileLoading ? (
@@ -2031,6 +2098,83 @@ export default function CerneApp() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {profileMenuOpen && viewingProfile && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setProfileMenuOpen(false)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <button onClick={() => blockUser(viewingProfile.id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
+              <X className="w-[18px] h-[18px]" /> Bloquear {viewingProfile.name}
+            </button>
+            <button onClick={() => { setReportTarget(viewingProfile); setProfileMenuOpen(false); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left">
+              <Eye className="w-[18px] h-[18px]" /> Denunciar perfil
+            </button>
+            <button onClick={() => setProfileMenuOpen(false)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium mt-3">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {reportTarget && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setReportTarget(null)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <p className="text-sm font-medium mb-3">Por que você está denunciando {reportTarget.name}?</p>
+            <div className="flex flex-col gap-1 mb-3">
+              {['Comportamento inadequado', 'Perfil falso', 'Conteúdo inadequado', 'Spam'].map((reason) => (
+                <button key={reason} onClick={() => submitReport(reportTarget.id, reason)} className="py-2.5 text-sm text-left border-b border-gray-100 last:border-b-0">
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setReportTarget(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setSettingsOpen(false)} />
+            <span className="text-sm font-medium">Configurações</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex items-center justify-between py-3 border-b border-gray-100">
+              <div>
+                <p className="text-sm font-medium">Modo invisível</p>
+                <p className="text-xs text-gray-400">Não aparecer no feed de descoberta dos outros</p>
+              </div>
+              <button
+                onClick={toggleInvisibleMode}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${profile.invisibleMode ? 'bg-rose-500 justify-end' : 'bg-gray-200 justify-start'}`}
+              >
+                <div className="w-5 h-5 bg-white rounded-full" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 mt-4 mb-2">contas bloqueadas</p>
+            {blockedUsers.length === 0 && <p className="text-xs text-gray-400 text-center py-6">Você não bloqueou ninguém.</p>}
+            <div className="flex flex-col gap-1">
+              {blockedUsers.map((u) => (
+                <div key={u.id} className="flex items-center gap-3 py-2.5 border-b border-gray-100">
+                  <Avatar initials={u.name.slice(0, 2).toUpperCase()} intentKey={u.intent} />
+                  <span className="flex-1 text-sm">{u.name}</span>
+                  <button onClick={() => unblockUser(u.id)} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500">
+                    Desbloquear
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={logout} className="w-full border border-gray-200 text-rose-600 rounded-lg py-2.5 text-sm font-medium mt-6">
+              Sair da conta
+            </button>
           </div>
         </div>
       )}
