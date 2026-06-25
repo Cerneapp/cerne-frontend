@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical
+  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical, RefreshCw, Image as ImageIcon
 } from 'lucide-react';
 
 const API_URL = 'https://cerne-backend.onrender.com';
@@ -124,14 +124,26 @@ export default function CerneApp() {
 
   const [openReactId, setOpenReactId] = useState(null);
   const [reactDraft, setReactDraft] = useState('');
+  const [openCommentId, setOpenCommentId] = useState(null);
+  const [commentDraft, setCommentDraft] = useState('');
 
-  const [createOpen, setCreateOpen] = useState(false);
+  const [creatorOpen, setCreatorOpen] = useState(false);
+  const [creatorMode, setCreatorMode] = useState('pulse'); // pulse | momento | reel
   const [createText, setCreateText] = useState('');
   const [createTags, setCreateTags] = useState(['trilha']);
   const [createImageUrl, setCreateImageUrl] = useState(null);
   const [createImagePreview, setCreateImagePreview] = useState(null);
   const [createMediaType, setCreateMediaType] = useState('image');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [facingMode, setFacingMode] = useState('user');
+  const [isRecording, setIsRecording] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordedChunksRef = useRef([]);
 
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchWith, setMatchWith] = useState('');
@@ -145,9 +157,10 @@ export default function CerneApp() {
   const [storyMenuOpen, setStoryMenuOpen] = useState(false);
   const [hideListOpen, setHideListOpen] = useState(false);
   const [hiddenUserIds, setHiddenUserIds] = useState([]);
-  const [creatingStory, setCreatingStory] = useState(false);
   const [profileGridTab, setProfileGridTab] = useState('pulses');
   const [viewingOwnPulse, setViewingOwnPulse] = useState(null);
+  const [viewingProfile, setViewingProfile] = useState(null);
+  const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   const [interests, setInterests] = useState([]);
 
   // Tenta recuperar sessão salva ao abrir o app
@@ -206,7 +219,10 @@ export default function CerneApp() {
           hasPhoto: !!p.mediaUrl,
           mediaUrl: p.mediaUrl,
           mediaType: p.mediaType || 'image',
-          comments: p.reactions.map((r) => ({ id: r.userId, name: r.user.name, intentKey: r.user.intent, text: r.comment })),
+          comments: [
+            ...p.reactions.map((r) => ({ key: `r-${r.userId}`, userId: r.userId, name: r.user.name, intentKey: r.user.intent, text: r.comment, createdAt: r.createdAt })),
+            ...p.comments.map((c) => ({ key: `c-${c.id}`, userId: c.userId, name: c.user.name, intentKey: c.user.intent, text: c.text, createdAt: c.createdAt })),
+          ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
           reacted: p.reactions.some((r) => r.userId === uid),
           own: p.authorId === uid,
         }))
@@ -368,6 +384,58 @@ export default function CerneApp() {
     }
   }
 
+  async function openProfile(targetId) {
+    if (targetId === userId) {
+      setTab('profile');
+      return;
+    }
+    setViewingProfileLoading(true);
+    setViewingProfile({ id: targetId, loading: true });
+    try {
+      const data = await apiFetch(`/users/${targetId}`, {}, token);
+      setViewingProfile({
+        ...data,
+        mappedPulses: data.pulses.map((p) => ({
+          id: p.id,
+          author: data.name,
+          authorId: data.id,
+          intentKey: data.intent,
+          time: timeAgo(p.createdAt),
+          text: p.text,
+          tags: [],
+          comments: [],
+          hasPhoto: !!p.mediaUrl,
+          mediaUrl: p.mediaUrl,
+          mediaType: p.mediaType || 'image',
+        })),
+      });
+    } catch (err) {
+      setFeedError('Não foi possível carregar esse perfil.');
+      setViewingProfile(null);
+    } finally {
+      setViewingProfileLoading(false);
+    }
+  }
+
+  async function submitComment(pulse) {
+    if (!commentDraft.trim()) return;
+    const text = commentDraft;
+    setCommentDraft('');
+    setOpenCommentId(null);
+    try {
+      await apiFetch(`/pulses/${pulse.id}/comments`, { method: 'POST', body: JSON.stringify({ userId, text }) }, token);
+      setPulses((prev) =>
+        prev.map((p) =>
+          p.id === pulse.id
+            ? { ...p, comments: [...p.comments, { key: `c-${Date.now()}`, userId, name: profile.name, intentKey: profile.intent, text, createdAt: new Date().toISOString() }] }
+            : p
+        )
+      );
+    } catch (err) {
+      setFeedError('Não foi possível comentar: ' + err.message);
+    }
+  }
+
   async function submitReaction(pulse) {
     if (!reactDraft.trim()) return;
     const commentText = reactDraft;
@@ -380,7 +448,7 @@ export default function CerneApp() {
       setPulses((prev) =>
         prev.map((p) =>
           p.id === pulse.id
-            ? { ...p, reacted: true, comments: [...p.comments, { id: userId, name: profile.name, intentKey: profile.intent, text: commentText }] }
+            ? { ...p, reacted: true, comments: [...p.comments, { key: `r-${userId}`, userId, name: profile.name, intentKey: profile.intent, text: commentText, createdAt: new Date().toISOString() }] }
             : p
         )
       );
@@ -396,16 +464,69 @@ export default function CerneApp() {
     }
   }
 
-  async function handlePhotoSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const isVideo = file.type.startsWith('video');
-    setCreateMediaType(isVideo ? 'video' : 'image');
-    setCreateImagePreview(URL.createObjectURL(file));
+  function stopCameraTracksOnly() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
+  async function startCamera(mode, wantsAudio) {
+    stopCameraTracksOnly();
+    setCameraError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: !!wantsAudio });
+      streamRef.current = stream;
+      setCameraOn(true);
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (err) {
+      setCameraError('Não conseguimos acessar sua câmera. Escolha um arquivo da galeria abaixo.');
+      setCameraOn(false);
+    }
+  }
+
+  function flipCamera() {
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(next);
+    startCamera(next, creatorMode === 'reel');
+  }
+
+  function openCreator(mode) {
+    setCreatorMode(mode);
+    setCreateImageUrl(null);
+    setCreateImagePreview(null);
+    setCreateMediaType(mode === 'reel' ? 'video' : 'image');
+    setCreateText('');
+    setCreateTags(['trilha']);
+    setCreatorOpen(true);
+    startCamera(facingMode, mode === 'reel');
+  }
+
+  function switchCreatorMode(mode) {
+    setCreatorMode(mode);
+    setCreateMediaType(mode === 'reel' ? 'video' : 'image');
+    if (!createImagePreview) startCamera(facingMode, mode === 'reel');
+  }
+
+  function closeCreator() {
+    stopCameraTracksOnly();
+    setCameraOn(false);
+    setIsRecording(false);
+    setCreatorOpen(false);
+    setCreateImageUrl(null);
+    setCreateImagePreview(null);
+  }
+
+  function retake() {
+    setCreateImageUrl(null);
+    setCreateImagePreview(null);
+    startCamera(facingMode, creatorMode === 'reel');
+  }
+
+  async function uploadCapturedBlob(blob, filename) {
+    setCreateImagePreview(URL.createObjectURL(blob));
     setUploadingPhoto(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', blob, filename);
       const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'erro ao enviar arquivo');
@@ -418,23 +539,77 @@ export default function CerneApp() {
     }
   }
 
-  async function handleStoryFileSelect(e) {
+  function takePhoto() {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      stopCameraTracksOnly();
+      setCameraOn(false);
+      setCreateMediaType('image');
+      uploadCapturedBlob(blob, 'photo.jpg');
+    }, 'image/jpeg', 0.9);
+  }
+
+  function startRecording() {
+    if (!streamRef.current) return;
+    recordedChunksRef.current = [];
+    const supportedType = ['video/mp4', 'video/webm'].find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+    const recorder = new MediaRecorder(streamRef.current, supportedType ? { mimeType: supportedType } : undefined);
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || 'video/webm' });
+      stopCameraTracksOnly();
+      setCameraOn(false);
+      setCreateMediaType('video');
+      uploadCapturedBlob(blob, 'video.webm');
+    };
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    setIsRecording(true);
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  }
+
+  function handleGallerySelect(e) {
     const file = e.target.files[0];
     if (!file) return;
     const isVideo = file.type.startsWith('video');
-    setCreatingStory(true);
+    setCreateMediaType(isVideo ? 'video' : 'image');
+    stopCameraTracksOnly();
+    setCameraOn(false);
+    uploadCapturedBlob(file, file.name);
+  }
+
+  async function publishFromCreator() {
+    if (!createImageUrl || publishing) return;
+    if (creatorMode !== 'momento' && !createText.trim()) return;
+    setPublishing(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'erro ao enviar momento');
-      await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: data.url, mediaType: isVideo ? 'video' : 'image' }) }, token);
-      await loadStories();
+      if (creatorMode === 'momento') {
+        await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: createImageUrl, mediaType: createMediaType }) }, token);
+        await loadStories();
+      } else {
+        await apiFetch(
+          '/pulses',
+          { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags, mediaUrl: createImageUrl, mediaType: createMediaType }) },
+          token
+        );
+        await loadFeed();
+      }
+      closeCreator();
     } catch (err) {
-      setFeedError('Não foi possível publicar o momento: ' + err.message);
+      setFeedError(err.message);
     } finally {
-      setCreatingStory(false);
+      setPublishing(false);
     }
   }
 
@@ -491,26 +666,6 @@ export default function CerneApp() {
       setHiddenUserIds((prev) => (isHidden ? prev.filter((id) => id !== personId) : [...prev, personId]));
     } catch (err) {
       setFeedError('Não foi possível atualizar: ' + err.message);
-    }
-  }
-
-  async function publishPulse() {
-    if (!createText.trim()) return;
-    try {
-      await apiFetch(
-        '/pulses',
-        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags, mediaUrl: createImageUrl, mediaType: createMediaType }) },
-        token
-      );
-      setCreateText('');
-      setCreateTags(['trilha']);
-      setCreateImageUrl(null);
-      setCreateImagePreview(null);
-      setCreateMediaType('image');
-      setCreateOpen(false);
-      await loadFeed();
-    } catch (err) {
-      setFeedError(err.message);
     }
   }
 
@@ -833,13 +988,12 @@ export default function CerneApp() {
                   <p className="text-[11px] mt-1">seu</p>
                 </button>
               ) : (
-                <label className="text-center flex-shrink-0 cursor-pointer">
+                <button onClick={() => openCreator('momento')} className="text-center flex-shrink-0">
                   <div className="w-14 h-14 rounded-full border-[1.5px] border-dashed border-gray-300 flex items-center justify-center">
-                    {creatingStory ? <span className="text-[10px] text-gray-400">...</span> : <Plus className="w-5 h-5 text-gray-400" />}
+                    <Plus className="w-5 h-5 text-gray-400" />
                   </div>
                   <p className="text-[11px] mt-1">seu</p>
-                  <input type="file" accept="image/*,video/*" onChange={handleStoryFileSelect} className="hidden" />
-                </label>
+                </button>
               )}
               {stories
                 .filter((s) => s.authorId !== userId)
@@ -867,11 +1021,13 @@ export default function CerneApp() {
               return (
                 <div key={pulse.id} className="border border-gray-200 rounded-2xl p-4">
                   <div className="flex items-center gap-2 mb-2">
-                    <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
-                    <div className="flex-1">
+                    <button onClick={() => openProfile(pulse.authorId)}>
+                      <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
+                    </button>
+                    <button className="flex-1 text-left" onClick={() => openProfile(pulse.authorId)}>
                       <p className="text-sm font-medium">{pulse.author}</p>
                       <p className="text-xs text-gray-500">{pulse.time}</p>
-                    </div>
+                    </button>
                     {pulse.own ? (
                       <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => removeOwnPulse(pulse.id)} />
                     ) : (
@@ -900,15 +1056,16 @@ export default function CerneApp() {
                   {pulse.comments.length > 0 && (
                     <div className="flex flex-col gap-1.5 mb-2 border-t border-gray-100 pt-2">
                       {pulse.comments.map((c) => (
-                        <p key={c.id} className="text-xs">
-                          <span className="font-medium">{c.name}</span> <span className="text-gray-600">{c.text}</span>
+                        <p key={c.key} className="text-xs">
+                          <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
+                          <span className="text-gray-600">{c.text}</span>
                         </p>
                       ))}
                     </div>
                   )}
 
                   {!pulse.own && !pulse.reacted && (
-                    <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2' : ''}>
+                    <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 mb-1.5' : 'mb-1.5'}>
                       {openReactId === pulse.id ? (
                         <div className="flex gap-2">
                           <input
@@ -929,6 +1086,28 @@ export default function CerneApp() {
                       )}
                     </div>
                   )}
+
+                  <div className={pulse.own && pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2' : ''}>
+                    {openCommentId === pulse.id ? (
+                      <div className="flex gap-2">
+                        <input
+                          autoFocus
+                          value={commentDraft}
+                          onChange={(e) => setCommentDraft(e.target.value)}
+                          placeholder="escreva um comentário..."
+                          onKeyDown={(e) => e.key === 'Enter' && submitComment(pulse)}
+                          className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                        />
+                        <button onClick={() => submitComment(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
+                          enviar
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setOpenCommentId(pulse.id); setCommentDraft(''); }} className="text-xs text-gray-400">
+                        comentar
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1123,65 +1302,111 @@ export default function CerneApp() {
         <div className="flex justify-around items-center py-3 border-t border-gray-100">
           <Home className={`w-5 h-5 cursor-pointer ${tab === 'feed' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('feed')} />
           <Compass className={`w-5 h-5 cursor-pointer ${tab === 'explore' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('explore')} />
-          <Plus className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => setCreateOpen(true)} />
+          <Plus className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => openCreator('pulse')} />
           <MessageCircle className={`w-5 h-5 cursor-pointer ${tab === 'chat' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('chat')} />
           <User className={`w-5 h-5 cursor-pointer ${tab === 'profile' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('profile')} />
         </div>
       )}
 
-      {createOpen && (
-        <div className="absolute inset-0 bg-white p-5 flex flex-col">
-          <div className="flex justify-between items-center mb-4">
-            <X
-              className="w-5 h-5 text-gray-500 cursor-pointer"
-              onClick={() => { setCreateOpen(false); setCreateImageUrl(null); setCreateImagePreview(null); setCreateMediaType('image'); }}
-            />
-            <span className="text-sm font-medium">Novo pulse</span>
-            <button
-              onClick={publishPulse}
-              disabled={uploadingPhoto}
-              className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-50"
-            >
-              Publicar
-            </button>
+      {creatorOpen && (
+        <div className="absolute inset-0 bg-black flex flex-col">
+          <div className="flex items-center justify-between p-4">
+            <X className="w-5 h-5 text-white cursor-pointer" onClick={closeCreator} />
+            <div className="flex gap-1 bg-white/15 rounded-full p-1">
+              {['pulse', 'momento', 'reel'].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => switchCreatorMode(m)}
+                  className={`px-3 py-1 rounded-full text-xs ${creatorMode === m ? 'bg-white text-gray-900 font-medium' : 'text-white'}`}
+                >
+                  {m === 'pulse' ? 'Pulse' : m === 'momento' ? 'Momento' : 'Reel'}
+                </button>
+              ))}
+            </div>
+            <span className="w-5" />
           </div>
-          <textarea
-            autoFocus
-            value={createText}
-            onChange={(e) => setCreateText(e.target.value)}
-            placeholder="O que você está fazendo agora?"
-            rows={4}
-            className="w-full border-none focus:outline-none text-sm mb-4 resize-none"
-          />
 
-          {createImagePreview && (
-            <div className="relative w-full h-40 bg-gray-100 rounded-lg overflow-hidden mb-4">
-              {createMediaType === 'video' ? (
-                <video src={createImagePreview} className="w-full h-full object-cover" muted />
+          <div className="flex-1 relative bg-gray-900 flex items-center justify-center overflow-hidden">
+            {createImagePreview ? (
+              createMediaType === 'video' ? (
+                <video src={createImagePreview} className="w-full h-full object-contain" controls autoPlay loop />
               ) : (
-                <img src={createImagePreview} alt="" className="w-full h-full object-cover" />
-              )}
-              {uploadingPhoto && (
-                <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-gray-600">Enviando...</div>
-              )}
-              <X
-                className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full p-1 text-gray-600 cursor-pointer"
-                onClick={() => { setCreateImageUrl(null); setCreateImagePreview(null); setCreateMediaType('image'); }}
+                <img src={createImagePreview} alt="" className="w-full h-full object-contain" />
+              )
+            ) : cameraOn ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+                style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
               />
+            ) : (
+              <p className="text-sm text-gray-300 px-8 text-center">{cameraError || 'Carregando câmera...'}</p>
+            )}
+
+            {cameraOn && !createImagePreview && (
+              <button onClick={flipCamera} className="absolute top-3 right-3 bg-black/40 rounded-full p-2">
+                <RefreshCw className="w-5 h-5 text-white" />
+              </button>
+            )}
+          </div>
+
+          {!createImagePreview ? (
+            <div className="p-5 flex items-center justify-between">
+              <label className="cursor-pointer">
+                <ImageIcon className="w-6 h-6 text-white" />
+                <input type="file" accept={creatorMode === 'reel' ? 'video/*' : 'image/*,video/*'} onChange={handleGallerySelect} className="hidden" />
+              </label>
+
+              {creatorMode === 'reel' ? (
+                <button
+                  onClick={() => (isRecording ? stopRecording() : startRecording())}
+                  className={`w-16 h-16 rounded-full border-4 border-white flex items-center justify-center ${isRecording ? 'bg-rose-600' : 'bg-transparent'}`}
+                  aria-label={isRecording ? 'Parar gravação' : 'Gravar vídeo'}
+                >
+                  {isRecording && <div className="w-5 h-5 bg-white rounded" />}
+                </button>
+              ) : (
+                <button onClick={takePhoto} className="w-16 h-16 rounded-full border-4 border-white" aria-label="Tirar foto" />
+              )}
+
+              <span className="w-6" />
+            </div>
+          ) : (
+            <div className="bg-white p-4">
+              {creatorMode !== 'momento' && (
+                <>
+                  <textarea
+                    autoFocus
+                    value={createText}
+                    onChange={(e) => setCreateText(e.target.value)}
+                    placeholder="Escreva uma legenda..."
+                    rows={2}
+                    className="w-full border-none focus:outline-none text-sm mb-3 resize-none"
+                  />
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {SUGGESTED_TAGS.map((tag) => (
+                      <Chip key={tag} label={`#${tag}`} selected={createTags.includes(tag)} onClick={() => setCreateTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))} />
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="flex gap-2">
+                <button onClick={retake} className="flex-1 border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
+                  Refazer
+                </button>
+                <button
+                  onClick={publishFromCreator}
+                  disabled={uploadingPhoto || publishing || (creatorMode !== 'momento' && !createText.trim())}
+                  className="flex-1 bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-2.5 text-sm font-medium disabled:opacity-50"
+                >
+                  {uploadingPhoto ? 'Enviando...' : publishing ? 'Publicando...' : 'Publicar'}
+                </button>
+              </div>
             </div>
           )}
-
-          <div className="flex gap-2 flex-wrap mb-4">
-            {SUGGESTED_TAGS.map((tag) => (
-              <Chip key={tag} label={`#${tag}`} selected={createTags.includes(tag)} onClick={() => setCreateTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))} />
-            ))}
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer border-t border-gray-100 pt-3">
-            <Camera className="w-5 h-5" />
-            {createImagePreview ? 'Trocar mídia' : 'Adicionar foto ou vídeo (reel)'}
-            <input type="file" accept="image/*,video/*" onChange={handlePhotoSelect} className="hidden" />
-          </label>
         </div>
       )}
 
@@ -1269,17 +1494,21 @@ export default function CerneApp() {
         <div className="absolute inset-0 bg-white flex flex-col">
           <div className="flex items-center justify-between p-4 border-b border-gray-100">
             <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setViewingOwnPulse(null)} />
-            <span className="text-sm font-medium">Seu pulse</span>
-            <Trash2
-              className="w-5 h-5 text-gray-400 cursor-pointer"
-              onClick={() => { removeOwnPulse(viewingOwnPulse.id); setViewingOwnPulse(null); }}
-            />
+            <span className="text-sm font-medium">Pulse</span>
+            {viewingOwnPulse.authorId === userId ? (
+              <Trash2
+                className="w-5 h-5 text-gray-400 cursor-pointer"
+                onClick={() => { removeOwnPulse(viewingOwnPulse.id); setViewingOwnPulse(null); }}
+              />
+            ) : (
+              <span className="w-5" />
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} />
+              <Avatar initials={viewingOwnPulse.author.slice(0, 2).toUpperCase()} intentKey={viewingOwnPulse.intentKey} />
               <div>
-                <p className="text-sm font-medium">{profile.name}</p>
+                <p className="text-sm font-medium">{viewingOwnPulse.author}</p>
                 <p className="text-xs text-gray-500">{viewingOwnPulse.time}</p>
               </div>
             </div>
@@ -1294,10 +1523,72 @@ export default function CerneApp() {
             )}
             <p className="text-sm mb-3">{viewingOwnPulse.text}</p>
             <div className="flex gap-1.5 flex-wrap">
-              {viewingOwnPulse.tags.map((t) => (
+              {(viewingOwnPulse.tags || []).map((t) => (
                 <span key={t} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{t}</span>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {viewingProfile && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setViewingProfile(null)} />
+            <span className="text-sm font-medium">{viewingProfile.loading ? '...' : viewingProfile.name}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            {viewingProfileLoading ? (
+              <p className="text-xs text-gray-400 text-center py-10">Carregando perfil...</p>
+            ) : (
+              <>
+                <div className="text-center mb-4">
+                  <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
+                  <p className="text-base font-medium">{viewingProfile.name}</p>
+                  {viewingProfile.bio && <p className="text-xs text-gray-500 mt-1 max-w-[260px] mx-auto">{viewingProfile.bio}</p>}
+                </div>
+
+                <div className="flex justify-around bg-gray-50 rounded-xl py-3 mb-4">
+                  <div className="text-center">
+                    <p className="text-base font-medium">{viewingProfile.matchCount}</p>
+                    <p className="text-[11px] text-gray-400">matches</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-base font-medium">{viewingProfile.interests.length}</p>
+                    <p className="text-[11px] text-gray-400">comunidades</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-base font-medium">{viewingProfile.mappedPulses.length}</p>
+                    <p className="text-[11px] text-gray-400">pulses</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 mb-4 justify-center">
+                  {viewingProfile.interests.map((i) => (
+                    <span key={i.interest.name} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{i.interest.name}</span>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {viewingProfile.mappedPulses.map((p) => (
+                    <button key={p.id} onClick={() => setViewingOwnPulse(p)} className="h-24 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                      {p.mediaUrl ? (
+                        p.mediaType === 'video' ? (
+                          <video src={p.mediaUrl} className="w-full h-full object-cover" />
+                        ) : (
+                          <img src={p.mediaUrl} alt="" className="w-full h-full object-cover" />
+                        )
+                      ) : (
+                        <p className="text-[11px] text-gray-400 p-2 line-clamp-3 text-left">{p.text}</p>
+                      )}
+                    </button>
+                  ))}
+                  {viewingProfile.mappedPulses.length === 0 && (
+                    <p className="text-xs text-gray-400 text-center py-6 col-span-2">Ainda sem pulses.</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
