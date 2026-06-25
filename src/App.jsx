@@ -206,6 +206,7 @@ export default function CerneApp() {
           hasPhoto: !!p.mediaUrl,
           mediaUrl: p.mediaUrl,
           mediaType: p.mediaType || 'image',
+          comments: p.reactions.map((r) => ({ id: r.userId, name: r.user.name, intentKey: r.user.intent, text: r.comment })),
           reacted: p.reactions.some((r) => r.userId === uid),
           own: p.authorId === uid,
         }))
@@ -369,13 +370,20 @@ export default function CerneApp() {
 
   async function submitReaction(pulse) {
     if (!reactDraft.trim()) return;
+    const commentText = reactDraft;
     try {
       const result = await apiFetch(
         `/pulses/${pulse.id}/react`,
-        { method: 'POST', body: JSON.stringify({ userId, comment: reactDraft }) },
+        { method: 'POST', body: JSON.stringify({ userId, comment: commentText }) },
         token
       );
-      setPulses((prev) => prev.map((p) => (p.id === pulse.id ? { ...p, reacted: true } : p)));
+      setPulses((prev) =>
+        prev.map((p) =>
+          p.id === pulse.id
+            ? { ...p, reacted: true, comments: [...p.comments, { id: userId, name: profile.name, intentKey: profile.intent, text: commentText }] }
+            : p
+        )
+      );
       setOpenReactId(null);
       setReactDraft('');
       if (result.match) {
@@ -889,11 +897,19 @@ export default function CerneApp() {
                     ))}
                   </div>
 
-                  {!pulse.own && (
-                    <div className="border-t border-gray-100 pt-2">
-                      {pulse.reacted ? (
-                        <p className="text-xs text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> você reagiu de verdade</p>
-                      ) : openReactId === pulse.id ? (
+                  {pulse.comments.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mb-2 border-t border-gray-100 pt-2">
+                      {pulse.comments.map((c) => (
+                        <p key={c.id} className="text-xs">
+                          <span className="font-medium">{c.name}</span> <span className="text-gray-600">{c.text}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {!pulse.own && !pulse.reacted && (
+                    <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2' : ''}>
+                      {openReactId === pulse.id ? (
                         <div className="flex gap-2">
                           <input
                             autoFocus
