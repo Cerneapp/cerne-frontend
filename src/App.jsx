@@ -149,6 +149,7 @@ export default function CerneApp() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordingIntervalRef = useRef(null);
+  const captureHoldTimerRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -623,7 +624,7 @@ export default function CerneApp() {
   function flipCamera() {
     const next = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(next);
-    startCamera(next, creatorMode === 'reel');
+    startCamera(next, creatorMode !== 'pulse');
   }
 
   function openCreator(mode) {
@@ -634,13 +635,13 @@ export default function CerneApp() {
     setCreateText('');
     setCreateTags(['trilha']);
     setCreatorOpen(true);
-    startCamera(facingMode, mode === 'reel');
+    startCamera(facingMode, mode !== 'pulse');
   }
 
   function switchCreatorMode(mode) {
     setCreatorMode(mode);
     setCreateMediaType(mode === 'reel' ? 'video' : 'image');
-    if (!createImagePreview) startCamera(facingMode, mode === 'reel');
+    if (!createImagePreview) startCamera(facingMode, mode !== 'pulse');
   }
 
   function closeCreator() {
@@ -744,6 +745,25 @@ export default function CerneApp() {
     mediaRecorderRef.current?.stop();
     setIsRecording(false);
     clearInterval(recordingIntervalRef.current);
+  }
+
+  // Toque rápido tira foto, segurar grava vídeo — usado na aba Momento,
+  // que pode ser tanto foto quanto vídeo.
+  function handleCaptureHoldStart() {
+    captureHoldTimerRef.current = setTimeout(() => {
+      captureHoldTimerRef.current = null;
+      startRecording();
+    }, 350);
+  }
+
+  function handleCaptureHoldEnd() {
+    if (captureHoldTimerRef.current) {
+      clearTimeout(captureHoldTimerRef.current);
+      captureHoldTimerRef.current = null;
+      takePhoto();
+    } else if (isRecording) {
+      stopRecording();
+    }
   }
 
 
@@ -1110,6 +1130,125 @@ export default function CerneApp() {
   const activeConvo = conversations.find((c) => c.id === activeChatId);
   const activeMessages = messagesByChat[activeChatId] || [];
 
+  function renderPulseCard(pulse) {
+    const s = INTENT_STYLES[pulse.intentKey] || INTENT_STYLES.ambos;
+    return (
+      <div key={pulse.id} className="border border-gray-200 rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <button onClick={() => openProfile(pulse.authorId)}>
+            <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
+          </button>
+          <button className="flex-1 text-left" onClick={() => openProfile(pulse.authorId)}>
+            <p className="text-sm font-medium">{pulse.author}</p>
+            <p className="text-xs text-gray-500">{pulse.time}</p>
+          </button>
+          {pulse.own ? (
+            <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => removeOwnPulse(pulse.id)} />
+          ) : (
+            <span className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}>{INTENT_LABEL[pulse.intentKey] || 'aberto a ambos'}</span>
+          )}
+        </div>
+
+        {pulse.hasPhoto && (
+          <div className="relative w-full h-44 bg-gray-100 rounded-lg overflow-hidden mb-2">
+            {pulse.mediaType === 'video' ? (
+              <video
+                src={pulse.mediaUrl}
+                controls
+                className="w-full h-full object-cover"
+                onPlay={() => markPulseViewed(pulse.id, pulse.authorId)}
+              />
+            ) : (
+              <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
+            )}
+            {pulse.mediaType === 'video' && !pulse.own && (
+              <button onClick={() => togglePulseLike(pulse)} className="absolute top-2 right-2 bg-black/40 rounded-full p-1.5">
+                <Heart className={`w-4 h-4 ${pulse.likedByMe ? 'text-rose-500 fill-rose-500' : 'text-white'}`} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <p className="text-sm mb-2">{pulse.text}</p>
+
+        <div className="flex gap-1.5 mb-2 flex-wrap">
+          {pulse.tags.map((t) => (
+            <span key={t} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{t}</span>
+          ))}
+        </div>
+
+        {pulse.comments.length > 0 && (
+          <div className="flex flex-col gap-1.5 mb-2 border-t border-gray-100 pt-2">
+            {pulse.comments.map((c) => (
+              <div key={c.key} className="flex items-start justify-between gap-2">
+                <p className="text-xs">
+                  <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
+                  <span className="text-gray-600">{c.text}</span>
+                  {c.likeCount > 0 && (
+                    <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
+                  )}
+                </p>
+                {c.commentId && (
+                  <button onClick={() => toggleCommentLike(pulse.id, c.key, c.commentId)} className="flex-shrink-0 mt-0.5">
+                    <Heart className={`w-3 h-3 ${c.likedByMe ? 'text-rose-500 fill-rose-500' : 'text-gray-300'}`} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!pulse.own && !pulse.reacted && (
+          <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 mb-1.5' : 'mb-1.5'}>
+            {openReactId === pulse.id ? (
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={reactDraft}
+                  onChange={(e) => setReactDraft(e.target.value)}
+                  placeholder="escreva uma reação real..."
+                  className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                />
+                <button onClick={() => submitReaction(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
+                  enviar
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => { setOpenReactId(pulse.id); setReactDraft(''); }} className="text-xs text-gray-500 flex items-center gap-1">
+                <Heart className="w-3.5 h-3.5" /> reagir
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className={pulse.own && pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 flex items-center justify-between' : 'flex items-center justify-between'}>
+          {openCommentId === pulse.id ? (
+            <div className="flex gap-2 flex-1">
+              <input
+                autoFocus
+                value={commentDraft}
+                onChange={(e) => setCommentDraft(e.target.value)}
+                placeholder="escreva um comentário..."
+                onKeyDown={(e) => e.key === 'Enter' && submitComment(pulse)}
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+              />
+              <button onClick={() => submitComment(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
+                enviar
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => { setOpenCommentId(pulse.id); setCommentDraft(''); }} className="text-xs text-gray-400">
+              comentar
+            </button>
+          )}
+          <button onClick={() => setSharingPulse(pulse)} className="text-gray-400 flex-shrink-0 ml-2">
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-sm mx-auto h-[700px] bg-white rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans">
       {!(tab === 'chat' && activeConvo) && (
@@ -1127,6 +1266,7 @@ export default function CerneApp() {
             </>
           )}
           {tab === 'explore' && <span className="text-base font-medium">Explorar</span>}
+          {tab === 'reels' && <span className="text-base font-medium">Reels</span>}
           {tab === 'chat' && <span className="text-base font-medium">Conversas</span>}
           {tab === 'profile' && (
             <>
@@ -1184,125 +1324,17 @@ export default function CerneApp() {
                 <button onClick={() => loadFeed()} className="font-medium underline ml-2 flex-shrink-0">tentar de novo</button>
               </div>
             )}
-            {pulses.length === 0 && !feedError && <p className="text-xs text-gray-400 text-center py-10">Nenhum pulse ainda. Seja o primeiro a postar!</p>}
-            {pulses.map((pulse) => {
-              const s = INTENT_STYLES[pulse.intentKey] || INTENT_STYLES.ambos;
-              return (
-                <div key={pulse.id} className="border border-gray-200 rounded-2xl p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <button onClick={() => openProfile(pulse.authorId)}>
-                      <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
-                    </button>
-                    <button className="flex-1 text-left" onClick={() => openProfile(pulse.authorId)}>
-                      <p className="text-sm font-medium">{pulse.author}</p>
-                      <p className="text-xs text-gray-500">{pulse.time}</p>
-                    </button>
-                    {pulse.own ? (
-                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => removeOwnPulse(pulse.id)} />
-                    ) : (
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}>{INTENT_LABEL[pulse.intentKey] || 'aberto a ambos'}</span>
-                    )}
-                  </div>
+            {pulses.filter((p) => p.mediaType !== 'video').length === 0 && !feedError && <p className="text-xs text-gray-400 text-center py-10">Nenhum pulse ainda. Seja o primeiro a postar!</p>}
+            {pulses.filter((p) => p.mediaType !== 'video').map(renderPulseCard)}
+          </div>
+        )}
 
-                  {pulse.hasPhoto && (
-                    <div className="relative w-full h-44 bg-gray-100 rounded-lg overflow-hidden mb-2">
-                      {pulse.mediaType === 'video' ? (
-                        <video
-                          src={pulse.mediaUrl}
-                          controls
-                          className="w-full h-full object-cover"
-                          onPlay={() => markPulseViewed(pulse.id, pulse.authorId)}
-                        />
-                      ) : (
-                        <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
-                      )}
-                      {pulse.mediaType === 'video' && !pulse.own && (
-                        <button onClick={() => togglePulseLike(pulse)} className="absolute top-2 right-2 bg-black/40 rounded-full p-1.5">
-                          <Heart className={`w-4 h-4 ${pulse.likedByMe ? 'text-rose-500 fill-rose-500' : 'text-white'}`} />
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <p className="text-sm mb-2">{pulse.text}</p>
-
-                  <div className="flex gap-1.5 mb-2 flex-wrap">
-                    {pulse.tags.map((t) => (
-                      <span key={t} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{t}</span>
-                    ))}
-                  </div>
-
-                  {pulse.comments.length > 0 && (
-                    <div className="flex flex-col gap-1.5 mb-2 border-t border-gray-100 pt-2">
-                      {pulse.comments.map((c) => (
-                        <div key={c.key} className="flex items-start justify-between gap-2">
-                          <p className="text-xs">
-                            <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
-                            <span className="text-gray-600">{c.text}</span>
-                            {c.likeCount > 0 && (
-                              <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
-                            )}
-                          </p>
-                          {c.commentId && (
-                            <button onClick={() => toggleCommentLike(pulse.id, c.key, c.commentId)} className="flex-shrink-0 mt-0.5">
-                              <Heart className={`w-3 h-3 ${c.likedByMe ? 'text-rose-500 fill-rose-500' : 'text-gray-300'}`} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {!pulse.own && !pulse.reacted && (
-                    <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 mb-1.5' : 'mb-1.5'}>
-                      {openReactId === pulse.id ? (
-                        <div className="flex gap-2">
-                          <input
-                            autoFocus
-                            value={reactDraft}
-                            onChange={(e) => setReactDraft(e.target.value)}
-                            placeholder="escreva uma reação real..."
-                            className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
-                          />
-                          <button onClick={() => submitReaction(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
-                            enviar
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => { setOpenReactId(pulse.id); setReactDraft(''); }} className="text-xs text-gray-500 flex items-center gap-1">
-                          <Heart className="w-3.5 h-3.5" /> reagir
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className={pulse.own && pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 flex items-center justify-between' : 'flex items-center justify-between'}>
-                    {openCommentId === pulse.id ? (
-                      <div className="flex gap-2 flex-1">
-                        <input
-                          autoFocus
-                          value={commentDraft}
-                          onChange={(e) => setCommentDraft(e.target.value)}
-                          placeholder="escreva um comentário..."
-                          onKeyDown={(e) => e.key === 'Enter' && submitComment(pulse)}
-                          className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
-                        />
-                        <button onClick={() => submitComment(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
-                          enviar
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => { setOpenCommentId(pulse.id); setCommentDraft(''); }} className="text-xs text-gray-400">
-                        comentar
-                      </button>
-                    )}
-                    <button onClick={() => setSharingPulse(pulse)} className="text-gray-400 flex-shrink-0 ml-2">
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+        {tab === 'reels' && (
+          <div className="flex flex-col gap-3">
+            {pulses.filter((p) => p.mediaType === 'video').length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-10">Ainda sem reels. Toque no + e escolha a aba Reel.</p>
+            )}
+            {pulses.filter((p) => p.mediaType === 'video').map(renderPulseCard)}
           </div>
         )}
 
@@ -1510,6 +1542,7 @@ export default function CerneApp() {
         <div className="flex justify-around items-center py-3 border-t border-gray-100">
           <Home className={`w-5 h-5 cursor-pointer ${tab === 'feed' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('feed')} />
           <Compass className={`w-5 h-5 cursor-pointer ${tab === 'explore' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('explore')} />
+          <Video className={`w-5 h-5 cursor-pointer ${tab === 'reels' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('reels')} />
           <Plus className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => openCreator('pulse')} />
           <MessageCircle className={`w-5 h-5 cursor-pointer ${tab === 'chat' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('chat')} />
           <User className={`w-5 h-5 cursor-pointer ${tab === 'profile' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('profile')} />
@@ -1537,7 +1570,7 @@ export default function CerneApp() {
           <div className="flex-1 relative bg-gray-900 flex items-center justify-center overflow-hidden">
             {createImagePreview ? (
               createMediaType === 'video' ? (
-                <video src={createImagePreview} className="w-full h-full object-contain" controls autoPlay loop muted playsInline />
+                <video key={createImagePreview} src={createImagePreview} className="w-full h-full object-contain" controls autoPlay loop muted playsInline preload="auto" />
               ) : (
                 <img src={createImagePreview} alt="" className="w-full h-full object-contain" />
               )
@@ -1586,6 +1619,16 @@ export default function CerneApp() {
                   onClick={() => (isRecording ? stopRecording() : startRecording())}
                   className={`w-16 h-16 rounded-full border-4 border-white flex items-center justify-center ${isRecording ? 'bg-rose-600' : 'bg-transparent'}`}
                   aria-label={isRecording ? 'Parar gravação' : 'Gravar vídeo'}
+                >
+                  {isRecording && <div className="w-5 h-5 bg-white rounded" />}
+                </button>
+              ) : creatorMode === 'momento' ? (
+                <button
+                  onPointerDown={handleCaptureHoldStart}
+                  onPointerUp={handleCaptureHoldEnd}
+                  onPointerLeave={handleCaptureHoldEnd}
+                  className={`w-16 h-16 rounded-full border-4 border-white flex items-center justify-center ${isRecording ? 'bg-rose-600' : 'bg-transparent'}`}
+                  aria-label="Toque pra foto, segure pra vídeo"
                 >
                   {isRecording && <div className="w-5 h-5 bg-white rounded" />}
                 </button>
