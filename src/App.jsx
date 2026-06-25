@@ -1,47 +1,91 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
-  Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut
-} from 'lucide-react';
+  Home,
+  Compass,
+  Plus,
+  MessageCircle,
+  User,
+  Heart,
+  Camera,
+  X,
+  ChevronLeft,
+  Sparkles,
+  Send,
+  Search,
+  Bell,
+  Trash2,
+  Check,
+  Users,
+  LogOut,
+} from "lucide-react";
 
-const API_URL = 'https://cerne-backend.onrender.com';
+const API_URL = "https://cerne-backend.onrender.com";
 
-const INTERESTS = ['fotografia', 'trilha', 'música', 'viagem', 'corrida', 'cinema', 'filosofia', 'cozinha'];
+const INTERESTS = [
+  "fotografia",
+  "trilha",
+  "música",
+  "viagem",
+  "corrida",
+  "cinema",
+  "filosofia",
+  "cozinha",
+];
 
 const INTENT_OPTIONS = [
-  { key: 'amizade', label: 'Amizade', desc: 'Conectar por interesses em comum' },
-  { key: 'namoro', label: 'Namoro', desc: 'Abrir espaço pra romance' },
-  { key: 'ambos', label: 'Ambos', desc: 'Deixar a conexão te surpreender' },
+  {
+    key: "amizade",
+    label: "Amizade",
+    desc: "Conectar por interesses em comum",
+  },
+  { key: "namoro", label: "Namoro", desc: "Abrir espaço pra romance" },
+  { key: "ambos", label: "Ambos", desc: "Deixar a conexão te surpreender" },
 ];
 
 const INTENT_STYLES = {
-  amizade: { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-400' },
-  namoro: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-400' },
-  ambos: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-400' },
+  amizade: {
+    bg: "bg-emerald-100",
+    text: "text-emerald-700",
+    border: "border-emerald-400",
+  },
+  namoro: {
+    bg: "bg-blue-100",
+    text: "text-blue-700",
+    border: "border-blue-400",
+  },
+  ambos: {
+    bg: "bg-amber-100",
+    text: "text-amber-700",
+    border: "border-amber-400",
+  },
 };
 
-const INTENT_LABEL = { amizade: 'amizade', namoro: 'namoro', ambos: 'aberto a ambos' };
+const INTENT_LABEL = {
+  amizade: "amizade",
+  namoro: "namoro",
+  ambos: "aberto a ambos",
+};
 
-const SUGGESTED_TAGS = ['trilha', 'natureza', 'pôrdosol'];
+const SUGGESTED_TAGS = ["trilha", "natureza", "pôrdosol"];
 
 const COMMUNITIES = [
-  { name: 'fotografia', count: '3.400 pulses essa semana', style: 'blue' },
-  { name: 'trilha', count: '2.100 pulses essa semana', style: 'emerald' },
-  { name: 'filosofia', count: '980 pulses essa semana', style: 'amber' },
-  { name: 'música', count: '760 pulses essa semana', style: 'rose' },
+  { name: "fotografia", count: "3.400 pulses essa semana", style: "blue" },
+  { name: "trilha", count: "2.100 pulses essa semana", style: "emerald" },
+  { name: "filosofia", count: "980 pulses essa semana", style: "amber" },
+  { name: "música", count: "760 pulses essa semana", style: "rose" },
 ];
 
 const COMMUNITY_STYLES = {
-  blue: { bg: 'bg-blue-100', text: 'text-blue-700' },
-  emerald: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
-  amber: { bg: 'bg-amber-100', text: 'text-amber-700' },
-  rose: { bg: 'bg-rose-100', text: 'text-rose-700' },
+  blue: { bg: "bg-blue-100", text: "text-blue-700" },
+  emerald: { bg: "bg-emerald-100", text: "text-emerald-700" },
+  amber: { bg: "bg-amber-100", text: "text-amber-700" },
+  rose: { bg: "bg-rose-100", text: "text-rose-700" },
 };
 
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const min = Math.floor(diff / 60000);
-  if (min < 1) return 'agora';
+  if (min < 1) return "agora";
   if (min < 60) return `há ${min} min`;
   const h = Math.floor(min / 60);
   if (h < 24) return `há ${h} h`;
@@ -52,20 +96,23 @@ async function apiFetch(path, options = {}, token) {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Algo deu errado, tente novamente.');
+  if (!res.ok)
+    throw new Error(data.error || "Algo deu errado, tente novamente.");
   return data;
 }
 
-function Avatar({ initials, intentKey, size = 'w-9 h-9 text-sm' }) {
+function Avatar({ initials, intentKey, size = "w-9 h-9 text-sm" }) {
   const s = INTENT_STYLES[intentKey] || INTENT_STYLES.ambos;
   return (
-    <div className={`${size} ${s.bg} ${s.text} rounded-full flex items-center justify-center font-medium flex-shrink-0`}>
+    <div
+      className={`${size} ${s.bg} ${s.text} rounded-full flex items-center justify-center font-medium flex-shrink-0`}
+    >
       {initials}
     </div>
   );
@@ -76,7 +123,9 @@ function Chip({ label, selected, onClick }) {
     <button
       onClick={onClick}
       className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
-        selected ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-white border-gray-200 text-gray-600'
+        selected
+          ? "bg-blue-100 border-blue-400 text-blue-700"
+          : "bg-white border-gray-200 text-gray-600"
       }`}
     >
       {label}
@@ -85,45 +134,54 @@ function Chip({ label, selected, onClick }) {
 }
 
 export default function CerneApp() {
-  const [screen, setScreen] = useState('auth'); // auth | onboarding | app
+  const [screen, setScreen] = useState("auth"); // auth | onboarding | app
   const [booting, setBooting] = useState(true);
 
-  const [authMode, setAuthMode] = useState('login');
-  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
-  const [authError, setAuthError] = useState('');
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+  });
+  const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
   const [token, setToken] = useState(null);
   const [userId, setUserId] = useState(null);
 
   const [obStep, setObStep] = useState(0);
-  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos' });
+  const [profile, setProfile] = useState({
+    name: "",
+    bio: "",
+    interests: ["fotografia"],
+    intent: "ambos",
+  });
 
-  const [tab, setTab] = useState('feed');
+  const [tab, setTab] = useState("feed");
   const [pulses, setPulses] = useState([]);
-  const [feedError, setFeedError] = useState('');
+  const [feedError, setFeedError] = useState("");
   const [conversations, setConversations] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [messagesByChat, setMessagesByChat] = useState({});
-  const [chatDraft, setChatDraft] = useState('');
+  const [chatDraft, setChatDraft] = useState("");
 
   const [openReactId, setOpenReactId] = useState(null);
-  const [reactDraft, setReactDraft] = useState('');
+  const [reactDraft, setReactDraft] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [createText, setCreateText] = useState('');
-  const [createTags, setCreateTags] = useState(['trilha']);
+  const [createText, setCreateText] = useState("");
+  const [createTags, setCreateTags] = useState(["trilha"]);
 
   const [matchOpen, setMatchOpen] = useState(false);
-  const [matchWith, setMatchWith] = useState('');
+  const [matchWith, setMatchWith] = useState("");
 
-  const [exploreMsg, setExploreMsg] = useState('');
+  const [exploreMsg, setExploreMsg] = useState("");
   const [savedToast, setSavedToast] = useState(false);
 
   // Tenta recuperar sessão salva ao abrir o app
   useEffect(() => {
-    const savedToken = localStorage.getItem('cerne_token');
-    const savedUserId = localStorage.getItem('cerne_userId');
+    const savedToken = localStorage.getItem("cerne_token");
+    const savedUserId = localStorage.getItem("cerne_userId");
     if (savedToken && savedUserId) {
       setToken(savedToken);
       setUserId(savedUserId);
@@ -138,23 +196,23 @@ export default function CerneApp() {
       const user = await apiFetch(`/users/${uid}`, {}, tok);
       setProfile({
         name: user.name,
-        bio: user.bio || '',
+        bio: user.bio || "",
         interests: user.interests.map((i) => i.interest.name),
         intent: user.intent,
       });
-      setScreen('app');
+      setScreen("app");
       await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok)]);
     } catch (err) {
-      localStorage.removeItem('cerne_token');
-      localStorage.removeItem('cerne_userId');
-      setScreen('auth');
+      localStorage.removeItem("cerne_token");
+      localStorage.removeItem("cerne_userId");
+      setScreen("auth");
     }
   }
 
   async function loadFeed(uid = userId, tok = token) {
     try {
-      setFeedError('');
-      const raw = await apiFetch('/pulses', {}, tok);
+      setFeedError("");
+      const raw = await apiFetch("/pulses", {}, tok);
       setPulses(
         raw.map((p) => ({
           id: p.id,
@@ -167,10 +225,12 @@ export default function CerneApp() {
           hasPhoto: !!p.mediaUrl,
           reacted: p.reactions.some((r) => r.userId === uid),
           own: p.authorId === uid,
-        }))
+        })),
       );
     } catch (err) {
-      setFeedError('Não foi possível carregar o feed. O servidor pode estar acordando, tente de novo em um minuto.');
+      setFeedError(
+        "Não foi possível carregar o feed. O servidor pode estar acordando, tente de novo em um minuto.",
+      );
     }
   }
 
@@ -183,10 +243,10 @@ export default function CerneApp() {
           return {
             id: m.id,
             name: other.name,
-            intentKey: other.intent || 'ambos',
-            lastMessage: m.messages[0]?.text || 'vocês deram match. diga olá!',
+            intentKey: other.intent || "ambos",
+            lastMessage: m.messages[0]?.text || "vocês deram match. diga olá!",
           };
-        })
+        }),
       );
     } catch (err) {
       // silencioso — a lista de conversas pode ficar vazia sem quebrar o app
@@ -195,12 +255,15 @@ export default function CerneApp() {
 
   async function openChat(matchId) {
     setActiveChatId(matchId);
-    setTab('chat');
+    setTab("chat");
     try {
       const msgs = await apiFetch(`/matches/${matchId}/messages`, {}, token);
       setMessagesByChat((prev) => ({
         ...prev,
-        [matchId]: msgs.map((m) => ({ from: m.senderId === userId ? 'me' : 'them', text: m.text })),
+        [matchId]: msgs.map((m) => ({
+          from: m.senderId === userId ? "me" : "them",
+          text: m.text,
+        })),
       }));
     } catch (err) {
       setMessagesByChat((prev) => ({ ...prev, [matchId]: [] }));
@@ -215,7 +278,10 @@ export default function CerneApp() {
         .then((msgs) => {
           setMessagesByChat((prev) => ({
             ...prev,
-            [activeChatId]: msgs.map((m) => ({ from: m.senderId === userId ? 'me' : 'them', text: m.text })),
+            [activeChatId]: msgs.map((m) => ({
+              from: m.senderId === userId ? "me" : "them",
+              text: m.text,
+            })),
           }));
         })
         .catch(() => {});
@@ -225,24 +291,31 @@ export default function CerneApp() {
 
   async function handleAuthSubmit(e) {
     e.preventDefault();
-    setAuthError('');
+    setAuthError("");
     setAuthLoading(true);
     try {
-      const path = authMode === 'signup' ? '/auth/signup' : '/auth/login';
+      const path = authMode === "signup" ? "/auth/signup" : "/auth/login";
       const body =
-        authMode === 'signup'
-          ? { name: authForm.name, email: authForm.email, password: authForm.password }
+        authMode === "signup"
+          ? {
+              name: authForm.name,
+              email: authForm.email,
+              password: authForm.password,
+            }
           : { email: authForm.email, password: authForm.password };
 
-      const data = await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
-      localStorage.setItem('cerne_token', data.token);
-      localStorage.setItem('cerne_userId', data.user.id);
+      const data = await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      localStorage.setItem("cerne_token", data.token);
+      localStorage.setItem("cerne_userId", data.user.id);
       setToken(data.token);
       setUserId(data.user.id);
 
-      if (authMode === 'signup') {
+      if (authMode === "signup") {
         setProfile((p) => ({ ...p, name: data.user.name }));
-        setScreen('onboarding');
+        setScreen("onboarding");
       } else {
         await bootstrapApp(data.user.id, data.token);
       }
@@ -256,7 +329,9 @@ export default function CerneApp() {
   function toggleInterest(tag) {
     setProfile((p) => ({
       ...p,
-      interests: p.interests.includes(tag) ? p.interests.filter((i) => i !== tag) : [...p.interests, tag],
+      interests: p.interests.includes(tag)
+        ? p.interests.filter((i) => i !== tag)
+        : [...p.interests, tag],
     }));
   }
 
@@ -264,13 +339,20 @@ export default function CerneApp() {
     try {
       await apiFetch(
         `/users/${userId}`,
-        { method: 'PATCH', body: JSON.stringify({ bio: profile.bio, intent: profile.intent, interestNames: profile.interests }) },
-        token
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            bio: profile.bio,
+            intent: profile.intent,
+            interestNames: profile.interests,
+          }),
+        },
+        token,
       );
-      setScreen('app');
+      setScreen("app");
       await Promise.all([loadFeed(), loadConversations()]);
     } catch (err) {
-      setAuthError('Não foi possível salvar seu perfil. Tente novamente.');
+      setAuthError("Não foi possível salvar seu perfil. Tente novamente.");
     }
   }
 
@@ -279,12 +361,17 @@ export default function CerneApp() {
     try {
       const result = await apiFetch(
         `/pulses/${pulse.id}/react`,
-        { method: 'POST', body: JSON.stringify({ userId, comment: reactDraft }) },
-        token
+        {
+          method: "POST",
+          body: JSON.stringify({ userId, comment: reactDraft }),
+        },
+        token,
       );
-      setPulses((prev) => prev.map((p) => (p.id === pulse.id ? { ...p, reacted: true } : p)));
+      setPulses((prev) =>
+        prev.map((p) => (p.id === pulse.id ? { ...p, reacted: true } : p)),
+      );
       setOpenReactId(null);
-      setReactDraft('');
+      setReactDraft("");
       if (result.match) {
         setMatchWith(pulse.author);
         setMatchOpen(true);
@@ -299,12 +386,19 @@ export default function CerneApp() {
     if (!createText.trim()) return;
     try {
       await apiFetch(
-        '/pulses',
-        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags }) },
-        token
+        "/pulses",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            authorId: userId,
+            text: createText,
+            tagNames: createTags,
+          }),
+        },
+        token,
       );
-      setCreateText('');
-      setCreateTags(['trilha']);
+      setCreateText("");
+      setCreateTags(["trilha"]);
       setCreateOpen(false);
       await loadFeed();
     } catch (err) {
@@ -314,20 +408,31 @@ export default function CerneApp() {
 
   async function removeOwnPulse(id) {
     try {
-      await apiFetch(`/pulses/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }, token);
+      await apiFetch(
+        `/pulses/${id}?userId=${userId}`,
+        { method: "DELETE" },
+        token,
+      );
       setPulses((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
-      setFeedError('Não foi possível apagar o pulse.');
+      setFeedError(`Não foi possível apagar o pulse: ${err.message}`);
     }
   }
 
   async function sendChatMessage(matchId) {
     if (!chatDraft.trim()) return;
     const text = chatDraft.trim();
-    setChatDraft('');
-    setMessagesByChat((prev) => ({ ...prev, [matchId]: [...(prev[matchId] || []), { from: 'me', text }] }));
+    setChatDraft("");
+    setMessagesByChat((prev) => ({
+      ...prev,
+      [matchId]: [...(prev[matchId] || []), { from: "me", text }],
+    }));
     try {
-      await apiFetch(`/matches/${matchId}/messages`, { method: 'POST', body: JSON.stringify({ senderId: userId, text }) }, token);
+      await apiFetch(
+        `/matches/${matchId}/messages`,
+        { method: "POST", body: JSON.stringify({ senderId: userId, text }) },
+        token,
+      );
     } catch (err) {
       // mensagem já apareceu na tela; se falhar, ela só não persiste no servidor
     }
@@ -337,22 +442,30 @@ export default function CerneApp() {
     try {
       await apiFetch(
         `/users/${userId}`,
-        { method: 'PATCH', body: JSON.stringify({ name: profile.name, bio: profile.bio, intent: profile.intent, interestNames: profile.interests }) },
-        token
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: profile.name,
+            bio: profile.bio,
+            intent: profile.intent,
+            interestNames: profile.interests,
+          }),
+        },
+        token,
       );
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 1600);
     } catch (err) {
-      setFeedError('Não foi possível salvar.');
+      setFeedError("Não foi possível salvar.");
     }
   }
 
   function logout() {
-    localStorage.removeItem('cerne_token');
-    localStorage.removeItem('cerne_userId');
+    localStorage.removeItem("cerne_token");
+    localStorage.removeItem("cerne_userId");
     setToken(null);
     setUserId(null);
-    setScreen('auth');
+    setScreen("auth");
     setPulses([]);
     setConversations([]);
   }
@@ -366,26 +479,38 @@ export default function CerneApp() {
   }
 
   // ---------- AUTH (login / cadastro) ----------
-  if (screen === 'auth') {
+  if (screen === "auth") {
     return (
       <div className="max-w-sm mx-auto h-[700px] bg-gray-50 rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans p-6 justify-center">
-        <p className="text-2xl font-medium text-rose-600 text-center mb-1">Cerne</p>
-        <p className="text-xs text-gray-500 text-center italic mb-6">conecte-se pelo que é real</p>
+        <p className="text-2xl font-medium text-rose-600 text-center mb-1">
+          Cerne
+        </p>
+        <p className="text-xs text-gray-500 text-center italic mb-6">
+          conecte-se pelo que é real
+        </p>
 
         <div className="flex bg-gray-200 rounded-full p-1 mb-5">
-          <button onClick={() => setAuthMode('login')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'login' ? 'bg-white font-medium' : 'text-gray-500'}`}>
+          <button
+            onClick={() => setAuthMode("login")}
+            className={`flex-1 text-sm py-2 rounded-full ${authMode === "login" ? "bg-white font-medium" : "text-gray-500"}`}
+          >
             Entrar
           </button>
-          <button onClick={() => setAuthMode('signup')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'signup' ? 'bg-white font-medium' : 'text-gray-500'}`}>
+          <button
+            onClick={() => setAuthMode("signup")}
+            className={`flex-1 text-sm py-2 rounded-full ${authMode === "signup" ? "bg-white font-medium" : "text-gray-500"}`}
+          >
             Criar conta
           </button>
         </div>
 
         <form onSubmit={handleAuthSubmit}>
-          {authMode === 'signup' && (
+          {authMode === "signup" && (
             <input
               value={authForm.name}
-              onChange={(e) => setAuthForm((f) => ({ ...f, name: e.target.value }))}
+              onChange={(e) =>
+                setAuthForm((f) => ({ ...f, name: e.target.value }))
+              }
               placeholder="Nome"
               required
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
@@ -394,7 +519,9 @@ export default function CerneApp() {
           <input
             type="email"
             value={authForm.email}
-            onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+            onChange={(e) =>
+              setAuthForm((f) => ({ ...f, email: e.target.value }))
+            }
             placeholder="E-mail"
             required
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
@@ -402,25 +529,34 @@ export default function CerneApp() {
           <input
             type="password"
             value={authForm.password}
-            onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+            onChange={(e) =>
+              setAuthForm((f) => ({ ...f, password: e.target.value }))
+            }
             placeholder="Senha"
             required
             minLength={6}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 bg-white"
           />
 
-          {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
+          {authError && (
+            <p className="text-xs text-rose-600 mb-3">{authError}</p>
+          )}
 
           <button
             type="submit"
             disabled={authLoading}
             className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60"
           >
-            {authLoading ? 'Conectando ao servidor...' : authMode === 'signup' ? 'Criar conta' : 'Entrar'}
+            {authLoading
+              ? "Conectando ao servidor..."
+              : authMode === "signup"
+                ? "Criar conta"
+                : "Entrar"}
           </button>
           {authLoading && (
             <p className="text-[11px] text-gray-400 text-center mt-2">
-              Pode levar até 1 minuto na primeira vez (o servidor grátis "acorda" sob demanda).
+              Pode levar até 1 minuto na primeira vez (o servidor grátis
+              "acorda" sob demanda).
             </p>
           )}
         </form>
@@ -429,12 +565,15 @@ export default function CerneApp() {
   }
 
   // ---------- ONBOARDING ----------
-  if (screen === 'onboarding') {
+  if (screen === "onboarding") {
     return (
       <div className="max-w-sm mx-auto h-[700px] bg-gray-50 rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans p-6">
         <div className="flex justify-center gap-1.5 mb-6">
           {[0, 1, 2].map((i) => (
-            <span key={i} className={`h-1.5 rounded-full transition-all ${i === obStep ? 'w-5 bg-rose-500' : 'w-1.5 bg-gray-300'}`} />
+            <span
+              key={i}
+              className={`h-1.5 rounded-full transition-all ${i === obStep ? "w-5 bg-rose-500" : "w-1.5 bg-gray-300"}`}
+            />
           ))}
         </div>
 
@@ -442,13 +581,17 @@ export default function CerneApp() {
           {obStep === 0 && (
             <div>
               <p className="text-lg font-medium mb-1">Oi, {profile.name}!</p>
-              <p className="text-sm text-gray-500 mb-6">Conte um pouco sobre você.</p>
+              <p className="text-sm text-gray-500 mb-6">
+                Conte um pouco sobre você.
+              </p>
               <div className="w-20 h-20 rounded-full bg-white border-2 border-dashed border-gray-300 flex items-center justify-center mx-auto mb-6">
                 <Camera className="w-6 h-6 text-gray-400" />
               </div>
               <textarea
                 value={profile.bio}
-                onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, bio: e.target.value }))
+                }
                 placeholder="O que você está fazendo agora?"
                 rows={3}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white resize-none"
@@ -458,11 +601,20 @@ export default function CerneApp() {
 
           {obStep === 1 && (
             <div>
-              <p className="text-lg font-medium mb-1">Escolha seus interesses</p>
-              <p className="text-sm text-gray-500 mb-6">Vamos te conectar por afinidade real.</p>
+              <p className="text-lg font-medium mb-1">
+                Escolha seus interesses
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                Vamos te conectar por afinidade real.
+              </p>
               <div className="flex flex-wrap gap-2">
                 {INTERESTS.map((tag) => (
-                  <Chip key={tag} label={tag} selected={profile.interests.includes(tag)} onClick={() => toggleInterest(tag)} />
+                  <Chip
+                    key={tag}
+                    label={tag}
+                    selected={profile.interests.includes(tag)}
+                    onClick={() => toggleInterest(tag)}
+                  />
                 ))}
               </div>
             </div>
@@ -471,7 +623,9 @@ export default function CerneApp() {
           {obStep === 2 && (
             <div>
               <p className="text-lg font-medium mb-1">Qual sua intenção?</p>
-              <p className="text-sm text-gray-500 mb-6">Você pode mudar isso quando quiser.</p>
+              <p className="text-sm text-gray-500 mb-6">
+                Você pode mudar isso quando quiser.
+              </p>
               <div className="flex flex-col gap-2">
                 {INTENT_OPTIONS.map((opt) => {
                   const s = INTENT_STYLES[opt.key];
@@ -479,8 +633,10 @@ export default function CerneApp() {
                   return (
                     <button
                       key={opt.key}
-                      onClick={() => setProfile((p) => ({ ...p, intent: opt.key }))}
-                      className={`flex items-center gap-3 p-3 rounded-xl border text-left bg-white ${active ? `border-2 ${s.border}` : 'border-gray-200'}`}
+                      onClick={() =>
+                        setProfile((p) => ({ ...p, intent: opt.key }))
+                      }
+                      className={`flex items-center gap-3 p-3 rounded-xl border text-left bg-white ${active ? `border-2 ${s.border}` : "border-gray-200"}`}
                     >
                       <Sparkles className={`w-5 h-5 ${s.text}`} />
                       <div>
@@ -498,10 +654,12 @@ export default function CerneApp() {
         {authError && <p className="text-xs text-rose-600 mb-2">{authError}</p>}
 
         <button
-          onClick={() => (obStep < 2 ? setObStep(obStep + 1) : finishOnboarding())}
+          onClick={() =>
+            obStep < 2 ? setObStep(obStep + 1) : finishOnboarding()
+          }
           className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium mt-4"
         >
-          {obStep < 2 ? 'Continuar' : 'Começar a usar o Cerne'}
+          {obStep < 2 ? "Continuar" : "Começar a usar o Cerne"}
         </button>
       </div>
     );
@@ -513,9 +671,9 @@ export default function CerneApp() {
 
   return (
     <div className="max-w-sm mx-auto h-[700px] bg-white rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans">
-      {!(tab === 'chat' && activeConvo) && (
+      {!(tab === "chat" && activeConvo) && (
         <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-gray-100">
-          {tab === 'feed' && (
+          {tab === "feed" && (
             <>
               <span className="text-lg font-medium text-rose-600">Cerne</span>
               <div className="flex gap-3 text-gray-400">
@@ -524,12 +682,19 @@ export default function CerneApp() {
               </div>
             </>
           )}
-          {tab === 'explore' && <span className="text-base font-medium">Explorar</span>}
-          {tab === 'chat' && <span className="text-base font-medium">Conversas</span>}
-          {tab === 'profile' && (
+          {tab === "explore" && (
+            <span className="text-base font-medium">Explorar</span>
+          )}
+          {tab === "chat" && (
+            <span className="text-base font-medium">Conversas</span>
+          )}
+          {tab === "profile" && (
             <>
               <span className="text-base font-medium">Perfil</span>
-              <LogOut className="w-[18px] h-[18px] text-gray-400 cursor-pointer" onClick={logout} />
+              <LogOut
+                className="w-[18px] h-[18px] text-gray-400 cursor-pointer"
+                onClick={logout}
+              />
             </>
           )}
         </div>
@@ -537,36 +702,65 @@ export default function CerneApp() {
 
       {activeConvo && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-100">
-          <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setActiveChatId(null)} />
-          <Avatar initials={activeConvo.name.slice(0, 2).toUpperCase()} intentKey={activeConvo.intentKey} size="w-8 h-8 text-xs" />
+          <ChevronLeft
+            className="w-5 h-5 text-gray-500 cursor-pointer"
+            onClick={() => setActiveChatId(null)}
+          />
+          <Avatar
+            initials={activeConvo.name.slice(0, 2).toUpperCase()}
+            intentKey={activeConvo.intentKey}
+            size="w-8 h-8 text-xs"
+          />
           <span className="text-sm font-medium">{activeConvo.name}</span>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto p-4">
-        {tab === 'feed' && !activeConvo && (
+        {tab === "feed" && !activeConvo && (
           <div className="flex flex-col gap-3">
             {feedError && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
                 <span>{feedError}</span>
-                <button onClick={() => loadFeed()} className="font-medium underline ml-2 flex-shrink-0">tentar de novo</button>
+                <button
+                  onClick={() => loadFeed()}
+                  className="font-medium underline ml-2 flex-shrink-0"
+                >
+                  tentar de novo
+                </button>
               </div>
             )}
-            {pulses.length === 0 && !feedError && <p className="text-xs text-gray-400 text-center py-10">Nenhum pulse ainda. Seja o primeiro a postar!</p>}
+            {pulses.length === 0 && !feedError && (
+              <p className="text-xs text-gray-400 text-center py-10">
+                Nenhum pulse ainda. Seja o primeiro a postar!
+              </p>
+            )}
             {pulses.map((pulse) => {
               const s = INTENT_STYLES[pulse.intentKey] || INTENT_STYLES.ambos;
               return (
-                <div key={pulse.id} className="border border-gray-200 rounded-2xl p-4">
+                <div
+                  key={pulse.id}
+                  className="border border-gray-200 rounded-2xl p-4"
+                >
                   <div className="flex items-center gap-2 mb-2">
-                    <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
+                    <Avatar
+                      initials={pulse.author.slice(0, 2).toUpperCase()}
+                      intentKey={pulse.intentKey}
+                    />
                     <div className="flex-1">
                       <p className="text-sm font-medium">{pulse.author}</p>
                       <p className="text-xs text-gray-500">{pulse.time}</p>
                     </div>
                     {pulse.own ? (
-                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => removeOwnPulse(pulse.id)} />
+                      <Trash2
+                        className="w-4 h-4 text-gray-400 cursor-pointer"
+                        onClick={() => removeOwnPulse(pulse.id)}
+                      />
                     ) : (
-                      <span className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}>{INTENT_LABEL[pulse.intentKey] || 'aberto a ambos'}</span>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}
+                      >
+                        {INTENT_LABEL[pulse.intentKey] || "aberto a ambos"}
+                      </span>
                     )}
                   </div>
 
@@ -580,14 +774,22 @@ export default function CerneApp() {
 
                   <div className="flex gap-1.5 mb-2 flex-wrap">
                     {pulse.tags.map((t) => (
-                      <span key={t} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{t}</span>
+                      <span
+                        key={t}
+                        className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md"
+                      >
+                        {t}
+                      </span>
                     ))}
                   </div>
 
                   {!pulse.own && (
                     <div className="border-t border-gray-100 pt-2">
                       {pulse.reacted ? (
-                        <p className="text-xs text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> você reagiu de verdade</p>
+                        <p className="text-xs text-emerald-600 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> você reagiu de
+                          verdade
+                        </p>
                       ) : openReactId === pulse.id ? (
                         <div className="flex gap-2">
                           <input
@@ -597,12 +799,21 @@ export default function CerneApp() {
                             placeholder="escreva uma reação real..."
                             className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
                           />
-                          <button onClick={() => submitReaction(pulse)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium">
+                          <button
+                            onClick={() => submitReaction(pulse)}
+                            className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 text-xs font-medium"
+                          >
                             enviar
                           </button>
                         </div>
                       ) : (
-                        <button onClick={() => { setOpenReactId(pulse.id); setReactDraft(''); }} className="text-xs text-gray-500 flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setOpenReactId(pulse.id);
+                            setReactDraft("");
+                          }}
+                          className="text-xs text-gray-500 flex items-center gap-1"
+                        >
                           <Heart className="w-3.5 h-3.5" /> reagir
                         </button>
                       )}
@@ -614,19 +825,29 @@ export default function CerneApp() {
           </div>
         )}
 
-        {tab === 'explore' && (
+        {tab === "explore" && (
           <div>
             <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-4">
               <Search className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-400">Buscar interesses, pessoas...</span>
+              <span className="text-sm text-gray-400">
+                Buscar interesses, pessoas...
+              </span>
             </div>
             <p className="text-xs text-gray-400 mb-2">em alta essa semana</p>
             <div className="flex flex-col gap-2">
               {COMMUNITIES.map((c) => {
                 const s = COMMUNITY_STYLES[c.style];
                 return (
-                  <button key={c.name} onClick={() => setExploreMsg(`Em breve: feed dedicado a #${c.name}`)} className="flex items-center gap-3 border border-gray-200 rounded-xl p-3 text-left">
-                    <div className={`w-9 h-9 rounded-full ${s.bg} ${s.text} flex items-center justify-center`}>
+                  <button
+                    key={c.name}
+                    onClick={() =>
+                      setExploreMsg(`Em breve: feed dedicado a #${c.name}`)
+                    }
+                    className="flex items-center gap-3 border border-gray-200 rounded-xl p-3 text-left"
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-full ${s.bg} ${s.text} flex items-center justify-center`}
+                    >
                       <Users className="w-4 h-4" />
                     </div>
                     <div className="flex-1">
@@ -637,11 +858,13 @@ export default function CerneApp() {
                 );
               })}
             </div>
-            {exploreMsg && <p className="text-xs text-blue-600 mt-3">{exploreMsg}</p>}
+            {exploreMsg && (
+              <p className="text-xs text-blue-600 mt-3">{exploreMsg}</p>
+            )}
           </div>
         )}
 
-        {tab === 'chat' && !activeConvo && (
+        {tab === "chat" && !activeConvo && (
           <div className="flex flex-col gap-1">
             {conversations.length === 0 && (
               <div className="flex flex-col items-center justify-center text-center py-16">
@@ -649,28 +872,48 @@ export default function CerneApp() {
                   <MessageCircle className="w-6 h-6 text-blue-600" />
                 </div>
                 <p className="text-sm font-medium mb-1">Ainda sem conversas</p>
-                <p className="text-xs text-gray-500">Reaja de verdade aos pulses de alguém.</p>
+                <p className="text-xs text-gray-500">
+                  Reaja de verdade aos pulses de alguém.
+                </p>
               </div>
             )}
             {conversations.map((c) => (
-              <button key={c.id} onClick={() => openChat(c.id)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left">
-                <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+              <button
+                key={c.id}
+                onClick={() => openChat(c.id)}
+                className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left"
+              >
+                <Avatar
+                  initials={c.name.slice(0, 2).toUpperCase()}
+                  intentKey={c.intentKey}
+                />
                 <div className="flex-1">
                   <p className="text-sm font-medium">{c.name}</p>
-                  <p className="text-xs text-gray-500 truncate">{c.lastMessage}</p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {c.lastMessage}
+                  </p>
                 </div>
               </button>
             ))}
           </div>
         )}
 
-        {tab === 'chat' && activeConvo && (
+        {tab === "chat" && activeConvo && (
           <div className="flex flex-col h-full">
             <div className="flex-1 flex flex-col gap-2">
-              {activeMessages.length === 0 && <p className="text-xs text-gray-400 text-center py-6">Diga olá pra começar a conversa.</p>}
+              {activeMessages.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-6">
+                  Diga olá pra começar a conversa.
+                </p>
+              )}
               {activeMessages.map((m, i) => (
-                <div key={i} className={`max-w-[75%] ${m.from === 'me' ? 'self-end' : 'self-start'}`}>
-                  <div className={`rounded-2xl px-3 py-2 text-sm ${m.from === 'me' ? 'bg-blue-50 text-blue-800' : 'border border-gray-200'}`}>
+                <div
+                  key={i}
+                  className={`max-w-[75%] ${m.from === "me" ? "self-end" : "self-start"}`}
+                >
+                  <div
+                    className={`rounded-2xl px-3 py-2 text-sm ${m.from === "me" ? "bg-blue-50 text-blue-800" : "border border-gray-200"}`}
+                  >
                     {m.text}
                   </div>
                 </div>
@@ -679,27 +922,40 @@ export default function CerneApp() {
           </div>
         )}
 
-        {tab === 'profile' && (
+        {tab === "profile" && (
           <div>
             <div className="text-center mb-4">
-              <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
+              <Avatar
+                initials={profile.name.slice(0, 2).toUpperCase() || "EU"}
+                intentKey={profile.intent}
+                size="w-16 h-16 text-lg mx-auto mb-2"
+              />
               <input
                 value={profile.name}
-                onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+                onChange={(e) =>
+                  setProfile((p) => ({ ...p, name: e.target.value }))
+                }
                 className="text-center text-base font-medium border-none focus:outline-none"
               />
             </div>
             <p className="text-xs text-gray-400 mb-1">bio</p>
             <textarea
               value={profile.bio}
-              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+              onChange={(e) =>
+                setProfile((p) => ({ ...p, bio: e.target.value }))
+              }
               rows={2}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 resize-none"
             />
             <p className="text-xs text-gray-400 mb-2">interesses</p>
             <div className="flex flex-wrap gap-2 mb-4">
               {INTERESTS.map((tag) => (
-                <Chip key={tag} label={tag} selected={profile.interests.includes(tag)} onClick={() => toggleInterest(tag)} />
+                <Chip
+                  key={tag}
+                  label={tag}
+                  selected={profile.interests.includes(tag)}
+                  onClick={() => toggleInterest(tag)}
+                />
               ))}
             </div>
             <p className="text-xs text-gray-400 mb-2">intenção atual</p>
@@ -708,50 +964,85 @@ export default function CerneApp() {
                 const s = INTENT_STYLES[opt.key];
                 const active = profile.intent === opt.key;
                 return (
-                  <button key={opt.key} onClick={() => setProfile((p) => ({ ...p, intent: opt.key }))} className={`flex-1 text-xs py-2 rounded-lg border ${active ? `${s.bg} ${s.text} ${s.border}` : 'border-gray-200 text-gray-500'}`}>
+                  <button
+                    key={opt.key}
+                    onClick={() =>
+                      setProfile((p) => ({ ...p, intent: opt.key }))
+                    }
+                    className={`flex-1 text-xs py-2 rounded-lg border ${active ? `${s.bg} ${s.text} ${s.border}` : "border-gray-200 text-gray-500"}`}
+                  >
                     {opt.label}
                   </button>
                 );
               })}
             </div>
-            <button onClick={saveProfile} className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium">
-              {savedToast ? 'Salvo!' : 'Salvar alterações'}
+            <button
+              onClick={saveProfile}
+              className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium"
+            >
+              {savedToast ? "Salvo!" : "Salvar alterações"}
             </button>
           </div>
         )}
       </div>
 
-      {tab === 'chat' && activeConvo && (
+      {tab === "chat" && activeConvo && (
         <div className="p-3 border-t border-gray-100 flex gap-2">
           <input
             value={chatDraft}
             onChange={(e) => setChatDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendChatMessage(activeConvo.id)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && sendChatMessage(activeConvo.id)
+            }
             placeholder="Escreva uma mensagem..."
             className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
           />
-          <button onClick={() => sendChatMessage(activeConvo.id)} className="text-blue-600">
+          <button
+            onClick={() => sendChatMessage(activeConvo.id)}
+            className="text-blue-600"
+          >
             <Send className="w-5 h-5" />
           </button>
         </div>
       )}
 
-      {!(tab === 'chat' && activeConvo) && (
+      {!(tab === "chat" && activeConvo) && (
         <div className="flex justify-around items-center py-3 border-t border-gray-100">
-          <Home className={`w-5 h-5 cursor-pointer ${tab === 'feed' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('feed')} />
-          <Compass className={`w-5 h-5 cursor-pointer ${tab === 'explore' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('explore')} />
-          <Plus className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => setCreateOpen(true)} />
-          <MessageCircle className={`w-5 h-5 cursor-pointer ${tab === 'chat' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('chat')} />
-          <User className={`w-5 h-5 cursor-pointer ${tab === 'profile' ? 'text-rose-600' : 'text-gray-400'}`} onClick={() => setTab('profile')} />
+          <Home
+            className={`w-5 h-5 cursor-pointer ${tab === "feed" ? "text-rose-600" : "text-gray-400"}`}
+            onClick={() => setTab("feed")}
+          />
+          <Compass
+            className={`w-5 h-5 cursor-pointer ${tab === "explore" ? "text-rose-600" : "text-gray-400"}`}
+            onClick={() => setTab("explore")}
+          />
+          <Plus
+            className="w-5 h-5 text-gray-400 cursor-pointer"
+            onClick={() => setCreateOpen(true)}
+          />
+          <MessageCircle
+            className={`w-5 h-5 cursor-pointer ${tab === "chat" ? "text-rose-600" : "text-gray-400"}`}
+            onClick={() => setTab("chat")}
+          />
+          <User
+            className={`w-5 h-5 cursor-pointer ${tab === "profile" ? "text-rose-600" : "text-gray-400"}`}
+            onClick={() => setTab("profile")}
+          />
         </div>
       )}
 
       {createOpen && (
         <div className="absolute inset-0 bg-white p-5 flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <X className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setCreateOpen(false)} />
+            <X
+              className="w-5 h-5 text-gray-500 cursor-pointer"
+              onClick={() => setCreateOpen(false)}
+            />
             <span className="text-sm font-medium">Novo pulse</span>
-            <button onClick={publishPulse} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium">
+            <button
+              onClick={publishPulse}
+              className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium"
+            >
               Publicar
             </button>
           </div>
@@ -765,7 +1056,18 @@ export default function CerneApp() {
           />
           <div className="flex gap-2 flex-wrap">
             {SUGGESTED_TAGS.map((tag) => (
-              <Chip key={tag} label={`#${tag}`} selected={createTags.includes(tag)} onClick={() => setCreateTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))} />
+              <Chip
+                key={tag}
+                label={`#${tag}`}
+                selected={createTags.includes(tag)}
+                onClick={() =>
+                  setCreateTags((prev) =>
+                    prev.includes(tag)
+                      ? prev.filter((t) => t !== tag)
+                      : [...prev, tag],
+                  )
+                }
+              />
             ))}
           </div>
         </div>
@@ -774,13 +1076,17 @@ export default function CerneApp() {
       {matchOpen && (
         <div className="absolute inset-0 bg-white flex flex-col items-center justify-center text-center p-6">
           <div className="flex items-center justify-center mb-6">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-medium border-4 border-white -mr-4 z-10">EU</div>
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-medium border-4 border-white -mr-4 z-10">
+              EU
+            </div>
             <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-medium border-4 border-white">
               {matchWith.slice(0, 2).toUpperCase()}
             </div>
           </div>
           <p className="text-2xl font-medium mb-2">É um match!</p>
-          <p className="text-sm text-gray-500 mb-8 max-w-[240px]">Você e {matchWith} reagiram de verdade um ao outro.</p>
+          <p className="text-sm text-gray-500 mb-8 max-w-[240px]">
+            Você e {matchWith} reagiram de verdade um ao outro.
+          </p>
           <button
             onClick={() => {
               setMatchOpen(false);
@@ -791,7 +1097,10 @@ export default function CerneApp() {
           >
             Iniciar conversa
           </button>
-          <button onClick={() => setMatchOpen(false)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-3 text-sm font-medium">
+          <button
+            onClick={() => setMatchOpen(false)}
+            className="w-full border border-gray-200 text-gray-500 rounded-lg py-3 text-sm font-medium"
+          >
             Continuar explorando
           </button>
         </div>
