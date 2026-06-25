@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video
+  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical
 } from 'lucide-react';
 
 const API_URL = 'https://cerne-backend.onrender.com';
@@ -142,8 +142,12 @@ export default function CerneApp() {
   const [stories, setStories] = useState([]);
   const [viewingStory, setViewingStory] = useState(null);
   const [storyViewers, setStoryViewers] = useState(null);
+  const [storyMenuOpen, setStoryMenuOpen] = useState(false);
+  const [hideListOpen, setHideListOpen] = useState(false);
+  const [hiddenUserIds, setHiddenUserIds] = useState([]);
   const [creatingStory, setCreatingStory] = useState(false);
   const [profileGridTab, setProfileGridTab] = useState('pulses');
+  const [viewingOwnPulse, setViewingOwnPulse] = useState(null);
   const [interests, setInterests] = useState([]);
 
   // Tenta recuperar sessão salva ao abrir o app
@@ -237,6 +241,7 @@ export default function CerneApp() {
           const other = m.userAId === uid ? m.userB : m.userA;
           return {
             id: m.id,
+            otherId: other.id,
             name: other.name,
             intentKey: other.intent || 'ambos',
             lastMessage: m.messages[0]?.text || 'vocês deram match. diga olá!',
@@ -408,6 +413,7 @@ export default function CerneApp() {
   async function handleStoryFileSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
+    const isVideo = file.type.startsWith('video');
     setCreatingStory(true);
     try {
       const formData = new FormData();
@@ -415,7 +421,7 @@ export default function CerneApp() {
       const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'erro ao enviar momento');
-      await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: data.url }) }, token);
+      await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: data.url, mediaType: isVideo ? 'video' : 'image' }) }, token);
       await loadStories();
     } catch (err) {
       setFeedError('Não foi possível publicar o momento: ' + err.message);
@@ -441,6 +447,42 @@ export default function CerneApp() {
       } catch (err) {
         // não bloqueia a visualização se a marcação falhar
       }
+    }
+  }
+
+  async function deleteStory(storyId) {
+    try {
+      await apiFetch(`/stories/${storyId}?authorId=${userId}`, { method: 'DELETE' }, token);
+      setViewingStory(null);
+      setStoryMenuOpen(false);
+      await loadStories();
+    } catch (err) {
+      setFeedError('Não foi possível apagar o momento: ' + err.message);
+    }
+  }
+
+  async function openHideList() {
+    setStoryMenuOpen(false);
+    setHideListOpen(true);
+    try {
+      const list = await apiFetch(`/stories/hide-list?hiderId=${userId}`, {}, token);
+      setHiddenUserIds(list);
+    } catch (err) {
+      setHiddenUserIds([]);
+    }
+  }
+
+  async function toggleHidePerson(personId) {
+    const isHidden = hiddenUserIds.includes(personId);
+    try {
+      await apiFetch(
+        isHidden ? '/stories/unhide' : '/stories/hide',
+        { method: 'POST', body: JSON.stringify({ hiderId: userId, hiddenUserId: personId }) },
+        token
+      );
+      setHiddenUserIds((prev) => (isHidden ? prev.filter((id) => id !== personId) : [...prev, personId]));
+    } catch (err) {
+      setFeedError('Não foi possível atualizar: ' + err.message);
     }
   }
 
@@ -1019,7 +1061,7 @@ export default function CerneApp() {
               {pulses
                 .filter((p) => p.own && (profileGridTab === 'reels' ? p.mediaType === 'video' : true))
                 .map((p) => (
-                  <div key={p.id} className="h-24 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                  <button key={p.id} onClick={() => setViewingOwnPulse(p)} className="relative h-24 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
                     {p.mediaUrl ? (
                       p.mediaType === 'video' ? (
                         <video src={p.mediaUrl} className="w-full h-full object-cover" />
@@ -1027,9 +1069,14 @@ export default function CerneApp() {
                         <img src={p.mediaUrl} alt="" className="w-full h-full object-cover" />
                       )
                     ) : (
-                      <p className="text-[11px] text-gray-400 p-2 line-clamp-3">{p.text}</p>
+                      <p className="text-[11px] text-gray-400 p-2 line-clamp-3 text-left">{p.text}</p>
                     )}
-                  </div>
+                    {p.mediaType === 'video' && (
+                      <div className="absolute bottom-1 right-1 bg-black/50 rounded-full p-1">
+                        <Video className="w-3 h-3 text-white" />
+                      </div>
+                    )}
+                  </button>
                 ))}
               {pulses.filter((p) => p.own && (profileGridTab === 'reels' ? p.mediaType === 'video' : true)).length === 0 && (
                 <p className="text-xs text-gray-400 text-center py-6 col-span-2">
@@ -1131,11 +1178,31 @@ export default function CerneApp() {
               </div>
               <span className="text-sm text-white font-medium">{viewingStory.authorId === userId ? 'seu momento' : viewingStory.authorName}</span>
             </div>
-            <X className="w-5 h-5 text-white cursor-pointer" onClick={() => setViewingStory(null)} />
+            <div className="flex items-center gap-3">
+              {viewingStory.authorId === userId && (
+                <MoreVertical className="w-5 h-5 text-white cursor-pointer" onClick={() => setStoryMenuOpen((v) => !v)} />
+              )}
+              <X className="w-5 h-5 text-white cursor-pointer" onClick={() => { setViewingStory(null); setStoryMenuOpen(false); }} />
+            </div>
           </div>
 
+          {storyMenuOpen && (
+            <div className="absolute top-14 right-4 bg-white rounded-lg shadow-none border border-gray-200 overflow-hidden z-10">
+              <button onClick={() => deleteStory(viewingStory.id)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-rose-600 w-full text-left">
+                <Trash2 className="w-4 h-4" /> Apagar momento
+              </button>
+              <button onClick={openHideList} className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 w-full text-left border-t border-gray-100">
+                <Eye className="w-4 h-4" /> Ocultar de alguém
+              </button>
+            </div>
+          )}
+
           <div className="flex-1 flex items-center justify-center">
-            <img src={viewingStory.mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
+            {viewingStory.mediaType === 'video' ? (
+              <video src={viewingStory.mediaUrl} className="max-h-full max-w-full object-contain" controls autoPlay />
+            ) : (
+              <img src={viewingStory.mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
+            )}
           </div>
 
           {viewingStory.authorId === userId && (
@@ -1150,6 +1217,72 @@ export default function CerneApp() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {hideListOpen && (
+        <div className="absolute inset-0 bg-white flex flex-col p-5">
+          <div className="flex items-center justify-between mb-4">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setHideListOpen(false)} />
+            <span className="text-sm font-medium">Ocultar momentos de</span>
+            <span className="w-5" />
+          </div>
+          <p className="text-xs text-gray-400 mb-4">Quem você marcar aqui não vê mais nenhum dos seus momentos futuros, até você desmarcar.</p>
+          {conversations.length === 0 && <p className="text-xs text-gray-400 text-center py-8">Você ainda não tem matches pra ocultar.</p>}
+          <div className="flex flex-col gap-1">
+            {conversations.map((c) => {
+              const isHidden = hiddenUserIds.includes(c.otherId || c.id);
+              return (
+                <div key={c.id} className="flex items-center gap-3 py-2.5 border-b border-gray-100">
+                  <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                  <span className="flex-1 text-sm">{c.name}</span>
+                  <button
+                    onClick={() => toggleHidePerson(c.otherId || c.id)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border ${isHidden ? 'bg-rose-50 border-rose-300 text-rose-600' : 'border-gray-200 text-gray-500'}`}
+                  >
+                    {isHidden ? 'Ocultando' : 'Ocultar'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {viewingOwnPulse && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-gray-100">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setViewingOwnPulse(null)} />
+            <span className="text-sm font-medium">Seu pulse</span>
+            <Trash2
+              className="w-5 h-5 text-gray-400 cursor-pointer"
+              onClick={() => { removeOwnPulse(viewingOwnPulse.id); setViewingOwnPulse(null); }}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} />
+              <div>
+                <p className="text-sm font-medium">{profile.name}</p>
+                <p className="text-xs text-gray-500">{viewingOwnPulse.time}</p>
+              </div>
+            </div>
+            {viewingOwnPulse.hasPhoto && (
+              <div className="w-full bg-gray-100 rounded-lg overflow-hidden mb-3" style={{ maxHeight: 400 }}>
+                {viewingOwnPulse.mediaType === 'video' ? (
+                  <video src={viewingOwnPulse.mediaUrl} controls className="w-full h-full object-contain" />
+                ) : (
+                  <img src={viewingOwnPulse.mediaUrl} alt="" className="w-full h-full object-contain" />
+                )}
+              </div>
+            )}
+            <p className="text-sm mb-3">{viewingOwnPulse.text}</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {viewingOwnPulse.tags.map((t) => (
+                <span key={t} className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">{t}</span>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
