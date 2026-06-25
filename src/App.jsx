@@ -421,7 +421,7 @@ export default function CerneApp() {
     setViewingProfileLoading(true);
     setViewingProfile({ id: targetId, loading: true });
     try {
-      const data = await apiFetch(`/users/${targetId}`, {}, token);
+      const data = await apiFetch(`/users/${targetId}?viewerId=${userId}`, {}, token);
       setViewingProfile({
         ...data,
         mappedPulses: data.pulses.map((p) => ({
@@ -451,7 +451,8 @@ export default function CerneApp() {
       await apiFetch(`/users/${targetId}/block`, { method: 'POST', body: JSON.stringify({ blockerId: userId }) }, token);
       setProfileMenuOpen(false);
       setViewingProfile(null);
-      await Promise.all([loadFeed(), loadStories()]);
+      if (activeConvo?.otherId === targetId) setActiveChatId(null);
+      await Promise.all([loadFeed(), loadStories(), loadConversations()]);
       showToast('Pessoa bloqueada.');
     } catch (err) {
       setFeedError('Não foi possível bloquear: ' + err.message);
@@ -462,6 +463,7 @@ export default function CerneApp() {
     try {
       await apiFetch(`/users/${targetId}/unblock`, { method: 'POST', body: JSON.stringify({ blockerId: userId }) }, token);
       setBlockedUsers((prev) => prev.filter((u) => u.id !== targetId));
+      setViewingProfile((prev) => (prev && prev.id === targetId ? { ...prev, isBlockedByMe: false } : prev));
       await Promise.all([loadFeed(), loadStories()]);
       showToast('Pessoa desbloqueada.');
     } catch (err) {
@@ -2106,9 +2108,15 @@ export default function CerneApp() {
         <div className="absolute inset-0 flex items-end justify-center" onClick={() => setProfileMenuOpen(false)}>
           <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
             <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
-            <button onClick={() => blockUser(viewingProfile.id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
-              <X className="w-[18px] h-[18px]" /> Bloquear {viewingProfile.name}
-            </button>
+            {viewingProfile.isBlockedByMe ? (
+              <button onClick={() => { unblockUser(viewingProfile.id); setProfileMenuOpen(false); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
+                <X className="w-[18px] h-[18px]" /> Desbloquear {viewingProfile.name}
+              </button>
+            ) : (
+              <button onClick={() => blockUser(viewingProfile.id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
+                <X className="w-[18px] h-[18px]" /> Bloquear {viewingProfile.name}
+              </button>
+            )}
             <button onClick={() => { setReportTarget(viewingProfile); setProfileMenuOpen(false); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left">
               <Eye className="w-[18px] h-[18px]" /> Denunciar perfil
             </button>
