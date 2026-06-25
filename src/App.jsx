@@ -168,6 +168,7 @@ export default function CerneApp() {
   const [profileGridTab, setProfileGridTab] = useState('pulses');
   const [viewingOwnPulse, setViewingOwnPulse] = useState(null);
   const [pulseViewers, setPulseViewers] = useState(null);
+  const [sharingPulse, setSharingPulse] = useState(null);
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   const [interests, setInterests] = useState([]);
@@ -230,7 +231,7 @@ export default function CerneApp() {
           mediaType: p.mediaType || 'image',
           comments: [
             ...p.reactions.map((r) => ({ key: `r-${r.userId}`, commentId: null, userId: r.userId, name: r.user.name, intentKey: r.user.intent, text: r.comment, createdAt: r.createdAt, likedByMe: false })),
-            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid) })),
+            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid), likeCount: c.likes.length })),
           ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
           likedByMe: p.likes.some((l) => l.userId === uid),
           likeCount: p.likes.length,
@@ -281,15 +282,22 @@ export default function CerneApp() {
     }
   }
 
+  function mapMessages(msgs) {
+    return msgs.map((m) => ({
+      from: m.senderId === userId ? 'me' : 'them',
+      text: m.text,
+      sharedPulse: m.sharedPulse
+        ? { id: m.sharedPulse.id, text: m.sharedPulse.text, mediaUrl: m.sharedPulse.mediaUrl, mediaType: m.sharedPulse.mediaType, authorName: m.sharedPulse.author.name }
+        : null,
+    }));
+  }
+
   async function openChat(matchId) {
     setActiveChatId(matchId);
     setTab('chat');
     try {
       const msgs = await apiFetch(`/matches/${matchId}/messages`, {}, token);
-      setMessagesByChat((prev) => ({
-        ...prev,
-        [matchId]: msgs.map((m) => ({ from: m.senderId === userId ? 'me' : 'them', text: m.text })),
-      }));
+      setMessagesByChat((prev) => ({ ...prev, [matchId]: mapMessages(msgs) }));
     } catch (err) {
       setMessagesByChat((prev) => ({ ...prev, [matchId]: [] }));
     }
@@ -301,10 +309,7 @@ export default function CerneApp() {
     const interval = setInterval(() => {
       apiFetch(`/matches/${activeChatId}/messages`, {}, token)
         .then((msgs) => {
-          setMessagesByChat((prev) => ({
-            ...prev,
-            [activeChatId]: msgs.map((m) => ({ from: m.senderId === userId ? 'me' : 'them', text: m.text })),
-          }));
+          setMessagesByChat((prev) => ({ ...prev, [activeChatId]: mapMessages(msgs) }));
         })
         .catch(() => {});
     }, 4000);
@@ -438,7 +443,7 @@ export default function CerneApp() {
       setPulses((prev) =>
         prev.map((p) =>
           p.id === pulse.id
-            ? { ...p, comments: [...p.comments, { key: `c-${Date.now()}`, commentId: null, userId, name: profile.name, intentKey: profile.intent, text, createdAt: new Date().toISOString(), likedByMe: false }] }
+            ? { ...p, comments: [...p.comments, { key: `c-${Date.now()}`, commentId: null, userId, name: profile.name, intentKey: profile.intent, text, createdAt: new Date().toISOString(), likedByMe: false, likeCount: 0 }] }
             : p
         )
       );
@@ -490,6 +495,15 @@ export default function CerneApp() {
     }
   }
 
+  async function shareToMatch(pulse, matchId) {
+    try {
+      await apiFetch(`/matches/${matchId}/messages`, { method: 'POST', body: JSON.stringify({ senderId: userId, text: '', sharedPulseId: pulse.id }) }, token);
+      setSharingPulse(null);
+    } catch (err) {
+      setFeedError('Não foi possível compartilhar: ' + err.message);
+    }
+  }
+
   async function submitReaction(pulse) {
     if (!reactDraft.trim()) return;
     const commentText = reactDraft;
@@ -530,12 +544,30 @@ export default function CerneApp() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: !!wantsAudio });
       streamRef.current = stream;
       setCameraOn(true);
-      if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) {
+      if (wantsAudio) {
+        try {
+          const videoOnlyStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: false });
+          streamRef.current = videoOnlyStream;
+          setCameraOn(true);
+          setCameraError('Gravando sem áudio — permissão de microfone não foi concedida.');
+          return;
+        } catch (err2) {
+          // segue pro erro genérico abaixo
+        }
+      }
       setCameraError('Não conseguimos acessar sua câmera. Escolha um arquivo da galeria abaixo.');
       setCameraOn(false);
     }
   }
+
+  // Conecta a câmera ao elemento de vídeo só depois que ele já existe na tela
+  // (corrige a tela preta que acontecia por causa do timing do React)
+  useEffect(() => {
+    if (cameraOn && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [cameraOn]);
 
   function flipCamera() {
     const next = facingMode === 'user' ? 'environment' : 'user';
@@ -581,7 +613,18 @@ export default function CerneApp() {
   }
 
   async function uploadCapturedBlob(blob, filename) {
-    setCreateImagePreview(URL.createObjectURL(blob));
+    if (!blob || !(blob instanceof Blob) || blob.size === 0) {
+      setFeedError('A captura ficou vazia, tenta gravar de novo.');
+      return;
+    }
+    let previewUrl;
+    try {
+      previewUrl = URL.createObjectURL(blob);
+    } catch (err) {
+      setFeedError('Não foi possível processar o arquivo capturado, tenta de novo.');
+      return;
+    }
+    setCreateImagePreview(previewUrl);
     setUploadingPhoto(true);
     try {
       const formData = new FormData();
@@ -605,7 +648,10 @@ export default function CerneApp() {
     canvas.height = videoRef.current.videoHeight;
     canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
     canvas.toBlob((blob) => {
-      if (!blob) return;
+      if (!blob) {
+        setFeedError('Não foi possível tirar a foto, tenta de novo.');
+        return;
+      }
       stopCameraTracksOnly();
       setCameraOn(false);
       setCreateMediaType('image');
@@ -622,11 +668,16 @@ export default function CerneApp() {
       if (e.data.size > 0) recordedChunksRef.current.push(e.data);
     };
     recorder.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || 'video/webm' });
       stopCameraTracksOnly();
       setCameraOn(false);
+      if (recordedChunksRef.current.length === 0) {
+        setFeedError('A gravação ficou muito curta, tenta de novo segurando um pouco mais.');
+        startCamera(facingMode, true);
+        return;
+      }
+      const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || 'video/mp4' });
       setCreateMediaType('video');
-      uploadCapturedBlob(blob, 'video.webm');
+      uploadCapturedBlob(blob, 'video.mp4');
     };
     recorder.start();
     mediaRecorderRef.current = recorder;
@@ -1133,6 +1184,9 @@ export default function CerneApp() {
                           <p className="text-xs">
                             <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
                             <span className="text-gray-600">{c.text}</span>
+                            {c.userId === userId && c.likeCount > 0 && (
+                              <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
+                            )}
                           </p>
                           {c.commentId && (
                             <button onClick={() => toggleCommentLike(pulse.id, c.key, c.commentId)} className="flex-shrink-0 mt-0.5">
@@ -1167,9 +1221,9 @@ export default function CerneApp() {
                     </div>
                   )}
 
-                  <div className={pulse.own && pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2' : ''}>
+                  <div className={pulse.own && pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 flex items-center justify-between' : 'flex items-center justify-between'}>
                     {openCommentId === pulse.id ? (
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-1">
                         <input
                           autoFocus
                           value={commentDraft}
@@ -1187,6 +1241,9 @@ export default function CerneApp() {
                         comentar
                       </button>
                     )}
+                    <button onClick={() => setSharingPulse(pulse)} className="text-gray-400 flex-shrink-0 ml-2">
+                      <Send className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               );
@@ -1254,9 +1311,25 @@ export default function CerneApp() {
               {activeMessages.length === 0 && <p className="text-xs text-gray-400 text-center py-6">Diga olá pra começar a conversa.</p>}
               {activeMessages.map((m, i) => (
                 <div key={i} className={`max-w-[75%] ${m.from === 'me' ? 'self-end' : 'self-start'}`}>
-                  <div className={`rounded-2xl px-3 py-2 text-sm ${m.from === 'me' ? 'bg-blue-50 text-blue-800' : 'border border-gray-200'}`}>
-                    {m.text}
-                  </div>
+                  {m.sharedPulse ? (
+                    <button onClick={() => openPulseDetail({ ...m.sharedPulse, hasPhoto: !!m.sharedPulse.mediaUrl, author: m.sharedPulse.authorName, intentKey: 'ambos', authorId: '', time: '', tags: [], comments: [] })} className="border border-gray-200 rounded-2xl p-2 text-left">
+                      {m.sharedPulse.mediaUrl && (
+                        <div className="w-40 h-32 bg-gray-100 rounded-lg overflow-hidden mb-1">
+                          {m.sharedPulse.mediaType === 'video' ? (
+                            <video src={m.sharedPulse.mediaUrl} className="w-full h-full object-cover" />
+                          ) : (
+                            <img src={m.sharedPulse.mediaUrl} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-600 line-clamp-2 max-w-[150px]">{m.sharedPulse.text}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">pulse de {m.sharedPulse.authorName}</p>
+                    </button>
+                  ) : (
+                    <div className={`rounded-2xl px-3 py-2 text-sm ${m.from === 'me' ? 'bg-blue-50 text-blue-800' : 'border border-gray-200'}`}>
+                      {m.text}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1438,6 +1511,12 @@ export default function CerneApp() {
                 <span className="text-xs text-white font-medium">{formatSeconds(recordingSeconds)}</span>
               </div>
             )}
+
+            {cameraOn && cameraError && (
+              <div className="absolute bottom-3 left-3 right-3 bg-black/60 rounded-lg px-3 py-2">
+                <p className="text-xs text-white text-center">{cameraError}</p>
+              </div>
+            )}
           </div>
 
           {!createImagePreview ? (
@@ -1579,6 +1658,27 @@ export default function CerneApp() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {sharingPulse && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setSharingPulse(null)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full max-h-[80%] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <p className="text-sm font-medium mb-3">Enviar pra</p>
+            {conversations.length === 0 && <p className="text-xs text-gray-400 text-center py-8">Você ainda não tem matches pra enviar.</p>}
+            <div className="flex flex-col gap-1">
+              {conversations.map((c) => (
+                <button key={c.id} onClick={() => shareToMatch(sharingPulse, c.id)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                  <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                  <span className="flex-1 text-sm">{c.name}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setSharingPulse(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium mt-3">
+              Cancelar
+            </button>
           </div>
         </div>
       )}
