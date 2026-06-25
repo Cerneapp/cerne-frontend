@@ -128,6 +128,9 @@ export default function CerneApp() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createText, setCreateText] = useState('');
   const [createTags, setCreateTags] = useState(['trilha']);
+  const [createImageUrl, setCreateImageUrl] = useState(null);
+  const [createImagePreview, setCreateImagePreview] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchWith, setMatchWith] = useState('');
@@ -189,6 +192,7 @@ export default function CerneApp() {
           text: p.text,
           tags: p.tags.map((t) => t.interest.name),
           hasPhoto: !!p.mediaUrl,
+          mediaUrl: p.mediaUrl,
           reacted: p.reactions.some((r) => r.userId === uid),
           own: p.authorId === uid,
         }))
@@ -352,16 +356,38 @@ export default function CerneApp() {
     }
   }
 
+  async function handlePhotoSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCreateImagePreview(URL.createObjectURL(file));
+    setUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'erro ao enviar foto');
+      setCreateImageUrl(data.url);
+    } catch (err) {
+      setFeedError('Não foi possível enviar a foto: ' + err.message);
+      setCreateImagePreview(null);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
   async function publishPulse() {
     if (!createText.trim()) return;
     try {
       await apiFetch(
         '/pulses',
-        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags }) },
+        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags, mediaUrl: createImageUrl }) },
         token
       );
       setCreateText('');
       setCreateTags(['trilha']);
+      setCreateImageUrl(null);
+      setCreateImagePreview(null);
       setCreateOpen(false);
       await loadFeed();
     } catch (err) {
@@ -704,8 +730,8 @@ export default function CerneApp() {
                   </div>
 
                   {pulse.hasPhoto && (
-                    <div className="w-full h-32 bg-gray-100 rounded-lg flex items-center justify-center mb-2">
-                      <Camera className="w-6 h-6 text-gray-400" />
+                    <div className="w-full h-44 bg-gray-100 rounded-lg overflow-hidden mb-2">
+                      <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
                     </div>
                   )}
 
@@ -882,9 +908,16 @@ export default function CerneApp() {
       {createOpen && (
         <div className="absolute inset-0 bg-white p-5 flex flex-col">
           <div className="flex justify-between items-center mb-4">
-            <X className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setCreateOpen(false)} />
+            <X
+              className="w-5 h-5 text-gray-500 cursor-pointer"
+              onClick={() => { setCreateOpen(false); setCreateImageUrl(null); setCreateImagePreview(null); }}
+            />
             <span className="text-sm font-medium">Novo pulse</span>
-            <button onClick={publishPulse} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium">
+            <button
+              onClick={publishPulse}
+              disabled={uploadingPhoto}
+              className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium disabled:opacity-50"
+            >
               Publicar
             </button>
           </div>
@@ -896,11 +929,31 @@ export default function CerneApp() {
             rows={4}
             className="w-full border-none focus:outline-none text-sm mb-4 resize-none"
           />
-          <div className="flex gap-2 flex-wrap">
+
+          {createImagePreview && (
+            <div className="relative w-full h-40 bg-gray-100 rounded-lg overflow-hidden mb-4">
+              <img src={createImagePreview} alt="" className="w-full h-full object-cover" />
+              {uploadingPhoto && (
+                <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-gray-600">Enviando foto...</div>
+              )}
+              <X
+                className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full p-1 text-gray-600 cursor-pointer"
+                onClick={() => { setCreateImageUrl(null); setCreateImagePreview(null); }}
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 flex-wrap mb-4">
             {SUGGESTED_TAGS.map((tag) => (
               <Chip key={tag} label={`#${tag}`} selected={createTags.includes(tag)} onClick={() => setCreateTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))} />
             ))}
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer border-t border-gray-100 pt-3">
+            <Camera className="w-5 h-5" />
+            {createImagePreview ? 'Trocar foto' : 'Adicionar foto'}
+            <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+          </label>
         </div>
       )}
 
