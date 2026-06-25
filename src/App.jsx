@@ -62,6 +62,17 @@ async function apiFetch(path, options = {}, token) {
   return data;
 }
 
+function CerneMark({ size = 28 }) {
+  return (
+    <svg viewBox="0 0 280 280" width={size} height={size} aria-hidden="true">
+      <circle cx="140" cy="140" r="92" fill="none" stroke="#fda4af" strokeWidth="10" />
+      <circle cx="140" cy="140" r="70" fill="none" stroke="#fb7185" strokeWidth="10" />
+      <circle cx="140" cy="140" r="48" fill="none" stroke="#e11d48" strokeWidth="10" />
+      <circle cx="140" cy="140" r="20" fill="#9f1239" />
+    </svg>
+  );
+}
+
 function Avatar({ initials, intentKey, size = 'w-9 h-9 text-sm' }) {
   const s = INTENT_STYLES[intentKey] || INTENT_STYLES.ambos;
   return (
@@ -88,10 +99,14 @@ export default function CerneApp() {
   const [screen, setScreen] = useState('auth'); // auth | onboarding | app
   const [booting, setBooting] = useState(true);
 
-  const [authMode, setAuthMode] = useState('login');
+  const [authMode, setAuthMode] = useState('login'); // login | signup | forgot | reset
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [resetToken, setResetToken] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetDone, setResetDone] = useState(false);
 
   const [token, setToken] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -122,6 +137,15 @@ export default function CerneApp() {
 
   // Tenta recuperar sessão salva ao abrir o app
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromLink = params.get('resetToken');
+    if (tokenFromLink) {
+      setResetToken(tokenFromLink);
+      setAuthMode('reset');
+      setBooting(false);
+      return;
+    }
+
     const savedToken = localStorage.getItem('cerne_token');
     const savedUserId = localStorage.getItem('cerne_userId');
     if (savedToken && savedUserId) {
@@ -222,6 +246,39 @@ export default function CerneApp() {
     }, 4000);
     return () => clearInterval(interval);
   }, [activeChatId, token, userId]);
+
+  async function handleForgotSubmit(e) {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      await apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: authForm.email }) });
+      setForgotSent(true);
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleResetSubmit(e) {
+    e.preventDefault();
+    setAuthError('');
+    if (newPassword.length < 6) {
+      setAuthError('A senha precisa ter pelo menos 6 caracteres.');
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      await apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: resetToken, newPassword }) });
+      setResetDone(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
   async function handleAuthSubmit(e) {
     e.preventDefault();
@@ -365,65 +422,138 @@ export default function CerneApp() {
     );
   }
 
-  // ---------- AUTH (login / cadastro) ----------
+  // ---------- AUTH (login / cadastro / esqueci a senha / redefinir) ----------
   if (screen === 'auth') {
     return (
       <div className="max-w-sm mx-auto h-[700px] bg-gray-50 rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans p-6 justify-center">
-        <p className="text-2xl font-medium text-rose-600 text-center mb-1">Cerne</p>
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <CerneMark size={32} />
+          <span className="text-2xl font-medium text-rose-600">Cerne</span>
+        </div>
         <p className="text-xs text-gray-500 text-center italic mb-6">conecte-se pelo que é real</p>
 
-        <div className="flex bg-gray-200 rounded-full p-1 mb-5">
-          <button onClick={() => setAuthMode('login')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'login' ? 'bg-white font-medium' : 'text-gray-500'}`}>
-            Entrar
-          </button>
-          <button onClick={() => setAuthMode('signup')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'signup' ? 'bg-white font-medium' : 'text-gray-500'}`}>
-            Criar conta
-          </button>
-        </div>
+        {authMode === 'reset' ? (
+          resetDone ? (
+            <div className="text-center">
+              <p className="text-sm font-medium mb-2">Senha redefinida!</p>
+              <p className="text-xs text-gray-500 mb-5">Já pode entrar com a senha nova.</p>
+              <button
+                onClick={() => { setAuthMode('login'); setResetDone(false); setResetToken(null); }}
+                className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium"
+              >
+                Ir pro login
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleResetSubmit}>
+              <p className="text-sm text-gray-600 mb-3">Crie uma senha nova pra sua conta.</p>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Senha nova"
+                required
+                minLength={6}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 bg-white"
+              />
+              {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
+              <button type="submit" disabled={authLoading} className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60">
+                {authLoading ? 'Salvando...' : 'Salvar senha nova'}
+              </button>
+            </form>
+          )
+        ) : authMode === 'forgot' ? (
+          forgotSent ? (
+            <div className="text-center">
+              <p className="text-sm font-medium mb-2">E-mail enviado!</p>
+              <p className="text-xs text-gray-500 mb-5">Se esse e-mail existir, um link de recuperação foi enviado. Verifique sua caixa de entrada.</p>
+              <button onClick={() => { setAuthMode('login'); setForgotSent(false); }} className="w-full border border-gray-200 text-gray-500 rounded-lg py-3 text-sm font-medium">
+                Voltar pro login
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotSubmit}>
+              <p className="text-sm text-gray-600 mb-3">Digite o e-mail da sua conta.</p>
+              <input
+                type="email"
+                value={authForm.email}
+                onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+                placeholder="E-mail"
+                required
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 bg-white"
+              />
+              {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
+              <button type="submit" disabled={authLoading} className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60 mb-2">
+                {authLoading ? 'Enviando...' : 'Enviar link de recuperação'}
+              </button>
+              <button type="button" onClick={() => setAuthMode('login')} className="w-full text-gray-500 text-xs py-2">
+                Voltar pro login
+              </button>
+            </form>
+          )
+        ) : (
+          <>
+            <div className="flex bg-gray-200 rounded-full p-1 mb-5">
+              <button onClick={() => setAuthMode('login')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'login' ? 'bg-white font-medium' : 'text-gray-500'}`}>
+                Entrar
+              </button>
+              <button onClick={() => setAuthMode('signup')} className={`flex-1 text-sm py-2 rounded-full ${authMode === 'signup' ? 'bg-white font-medium' : 'text-gray-500'}`}>
+                Criar conta
+              </button>
+            </div>
 
-        <form onSubmit={handleAuthSubmit}>
-          {authMode === 'signup' && (
-            <input
-              value={authForm.name}
-              onChange={(e) => setAuthForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Nome"
-              required
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
-            />
-          )}
-          <input
-            type="email"
-            value={authForm.email}
-            onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
-            placeholder="E-mail"
-            required
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
-          />
-          <input
-            type="password"
-            value={authForm.password}
-            onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
-            placeholder="Senha"
-            required
-            minLength={6}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 bg-white"
-          />
+            <form onSubmit={handleAuthSubmit}>
+              {authMode === 'signup' && (
+                <input
+                  value={authForm.name}
+                  onChange={(e) => setAuthForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Nome"
+                  required
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
+                />
+              )}
+              <input
+                type="email"
+                value={authForm.email}
+                onChange={(e) => setAuthForm((f) => ({ ...f, email: e.target.value }))}
+                placeholder="E-mail"
+                required
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 bg-white"
+              />
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(e) => setAuthForm((f) => ({ ...f, password: e.target.value }))}
+                placeholder="Senha"
+                required
+                minLength={6}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-2 bg-white"
+              />
 
-          {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
+              {authMode === 'login' && (
+                <p onClick={() => setAuthMode('forgot')} className="text-xs text-blue-600 text-right mb-4 cursor-pointer">
+                  Esqueceu a senha?
+                </p>
+              )}
+              {authMode === 'signup' && <div className="mb-4" />}
 
-          <button
-            type="submit"
-            disabled={authLoading}
-            className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60"
-          >
-            {authLoading ? 'Conectando ao servidor...' : authMode === 'signup' ? 'Criar conta' : 'Entrar'}
-          </button>
-          {authLoading && (
-            <p className="text-[11px] text-gray-400 text-center mt-2">
-              Pode levar até 1 minuto na primeira vez (o servidor grátis "acorda" sob demanda).
-            </p>
-          )}
-        </form>
+              {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60"
+              >
+                {authLoading ? 'Conectando ao servidor...' : authMode === 'signup' ? 'Criar conta' : 'Entrar'}
+              </button>
+              {authLoading && (
+                <p className="text-[11px] text-gray-400 text-center mt-2">
+                  Pode levar até 1 minuto na primeira vez (o servidor grátis "acorda" sob demanda).
+                </p>
+              )}
+            </form>
+          </>
+        )}
       </div>
     );
   }
@@ -517,7 +647,10 @@ export default function CerneApp() {
         <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-gray-100">
           {tab === 'feed' && (
             <>
-              <span className="text-lg font-medium text-rose-600">Cerne</span>
+              <div className="flex items-center gap-2">
+                <CerneMark size={22} />
+                <span className="text-lg font-medium text-rose-600">Cerne</span>
+              </div>
               <div className="flex gap-3 text-gray-400">
                 <Search className="w-[18px] h-[18px]" />
                 <Bell className="w-[18px] h-[18px]" />
