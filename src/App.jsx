@@ -1748,7 +1748,7 @@ export default function CerneApp() {
           </div>
 
           {storyMenuOpen && (
-            <div className="absolute inset-0 flex items-end justify-center" onClick={() => setStoryMenuOpen(false)}>
+            <div className="absolute inset-0 flex items-end justify-center z-20" onClick={() => setStoryMenuOpen(false)}>
               <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
                 <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
                 {storyActionError && <p className="text-xs text-rose-600 mb-3 text-center">{storyActionError}</p>}
@@ -1778,8 +1778,20 @@ export default function CerneApp() {
             ) : (
               <img src={viewingStoryGroup.items[viewingStoryIndex].mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
             )}
-            <button onClick={() => goToStoryStep(-1)} className="absolute left-0 top-0 h-full w-1/3" aria-label="Momento anterior" />
-            <button onClick={() => goToStoryStep(1)} className="absolute right-0 top-0 h-full w-2/3" aria-label="Próximo momento" />
+            {!storyMenuOpen && (
+              <>
+                <button
+                  onClick={() => goToStoryStep(-1)}
+                  className="absolute left-0 top-0 h-full w-1/3 bg-transparent border-none p-0"
+                  aria-label="Momento anterior"
+                />
+                <button
+                  onClick={() => goToStoryStep(1)}
+                  className="absolute right-0 top-0 h-full w-2/3 bg-transparent border-none p-0"
+                  aria-label="Próximo momento"
+                />
+              </>
+            )}
           </div>
 
           {viewingStoryGroup.authorId === userId && (
