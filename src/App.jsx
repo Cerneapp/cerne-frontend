@@ -166,6 +166,7 @@ export default function CerneApp() {
   const [viewingStoryIndex, setViewingStoryIndex] = useState(0);
   const [storyViewers, setStoryViewers] = useState(null);
   const [storyMenuOpen, setStoryMenuOpen] = useState(false);
+  const [storyActionError, setStoryActionError] = useState('');
   const [hideListOpen, setHideListOpen] = useState(false);
   const [hiddenUserIds, setHiddenUserIds] = useState([]);
   const [profileGridTab, setProfileGridTab] = useState('pulses');
@@ -858,13 +859,14 @@ export default function CerneApp() {
   }
 
   async function deleteStory(storyId) {
+    setStoryActionError('');
     try {
       await apiFetch(`/stories/${storyId}?authorId=${userId}`, { method: 'DELETE' }, token);
       setViewingStoryGroup(null);
       setStoryMenuOpen(false);
       await loadStories();
     } catch (err) {
-      setFeedError('Não foi possível apagar o momento: ' + err.message);
+      setStoryActionError(err.message || 'Não foi possível apagar o momento.');
     }
   }
 
@@ -1196,9 +1198,13 @@ export default function CerneApp() {
             ) : (
               <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
             )}
-            {pulse.mediaType === 'video' && !pulse.own && (
-              <button onClick={() => togglePulseLike(pulse)} className="absolute top-2 right-2 bg-black/40 rounded-full p-1.5">
+            {pulse.mediaType === 'video' && (
+              <button
+                onClick={() => !pulse.own && togglePulseLike(pulse)}
+                className="absolute top-2 right-2 bg-black/40 rounded-full px-2 py-1 flex items-center gap-1"
+              >
                 <Heart className={`w-4 h-4 ${pulse.likedByMe ? 'text-rose-500 fill-rose-500' : 'text-white'}`} />
+                {pulse.likeCount > 0 && <span className="text-xs text-white">{pulse.likeCount}</span>}
               </button>
             )}
           </div>
@@ -1735,7 +1741,7 @@ export default function CerneApp() {
             </div>
             <div className="flex items-center gap-3">
               {viewingStoryGroup.authorId === userId && (
-                <MoreVertical className="w-5 h-5 text-white cursor-pointer" onClick={() => setStoryMenuOpen((v) => !v)} />
+                <MoreVertical className="w-5 h-5 text-white cursor-pointer" onClick={() => { setStoryMenuOpen((v) => !v); setStoryActionError(''); }} />
               )}
               <X className="w-5 h-5 text-white cursor-pointer" onClick={() => { setViewingStoryGroup(null); setStoryMenuOpen(false); }} />
             </div>
@@ -1745,6 +1751,7 @@ export default function CerneApp() {
             <div className="absolute inset-0 flex items-end justify-center" onClick={() => setStoryMenuOpen(false)}>
               <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
                 <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+                {storyActionError && <p className="text-xs text-rose-600 mb-3 text-center">{storyActionError}</p>}
                 <button onClick={() => deleteStory(viewingStoryGroup.items[viewingStoryIndex].id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
                   <Trash2 className="w-[18px] h-[18px]" /> Apagar momento
                 </button>
@@ -1921,12 +1928,8 @@ export default function CerneApp() {
               <div className="mt-4 bg-gray-50 rounded-xl p-3">
                 <div className="flex items-center gap-4 mb-2">
                   <div className="flex items-center gap-1.5">
-                    <Heart className="w-4 h-4 text-rose-500" />
-                    <span className="text-sm font-medium">{viewingOwnPulse.likeCount}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
                     <Eye className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm font-medium">{pulseViewers ? pulseViewers.count : '...'}</span>
+                    <span className="text-sm font-medium">{pulseViewers ? pulseViewers.count : '...'} visualizações</span>
                   </div>
                   <span className="text-[11px] text-gray-400">só você vê isso</span>
                 </div>
