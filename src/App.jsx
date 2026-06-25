@@ -162,7 +162,8 @@ export default function CerneApp() {
   const [savedToast, setSavedToast] = useState(false);
 
   const [stories, setStories] = useState([]);
-  const [viewingStory, setViewingStory] = useState(null);
+  const [viewingStoryGroup, setViewingStoryGroup] = useState(null);
+  const [viewingStoryIndex, setViewingStoryIndex] = useState(0);
   const [storyViewers, setStoryViewers] = useState(null);
   const [storyMenuOpen, setStoryMenuOpen] = useState(false);
   const [hideListOpen, setHideListOpen] = useState(false);
@@ -802,8 +803,22 @@ export default function CerneApp() {
     }
   }
 
-  async function openStory(story) {
-    setViewingStory(story);
+  // Agrupa os momentos por autor — uma pessoa com vários momentos aparece
+  // como um círculo só na barra, igual ao Instagram.
+  function getStoryGroups() {
+    const map = {};
+    for (const s of stories) {
+      if (!map[s.authorId]) map[s.authorId] = { authorId: s.authorId, authorName: s.authorName, authorIntent: s.authorIntent, items: [] };
+      map[s.authorId].items.push(s);
+    }
+    return Object.values(map).map((g) => {
+      const items = [...g.items].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      return { ...g, items, allViewed: items.every((s) => s.viewedByMe) };
+    });
+  }
+
+  async function loadStoryStep(group, index) {
+    const story = group.items[index];
     setStoryViewers(null);
     if (story.authorId === userId) {
       try {
@@ -822,10 +837,30 @@ export default function CerneApp() {
     }
   }
 
+  function openStoryGroup(group) {
+    const startIndex = group.items.findIndex((s) => !s.viewedByMe);
+    const index = startIndex === -1 ? 0 : startIndex;
+    setViewingStoryGroup(group);
+    setViewingStoryIndex(index);
+    loadStoryStep(group, index);
+  }
+
+  function goToStoryStep(direction) {
+    if (!viewingStoryGroup) return;
+    const nextIndex = viewingStoryIndex + direction;
+    if (nextIndex < 0) return;
+    if (nextIndex >= viewingStoryGroup.items.length) {
+      setViewingStoryGroup(null);
+      return;
+    }
+    setViewingStoryIndex(nextIndex);
+    loadStoryStep(viewingStoryGroup, nextIndex);
+  }
+
   async function deleteStory(storyId) {
     try {
       await apiFetch(`/stories/${storyId}?authorId=${userId}`, { method: 'DELETE' }, token);
-      setViewingStory(null);
+      setViewingStoryGroup(null);
       setStoryMenuOpen(false);
       await loadStories();
     } catch (err) {
@@ -1198,7 +1233,7 @@ export default function CerneApp() {
           </div>
         )}
 
-        {!pulse.own && !pulse.reacted && (
+        {!pulse.own && !pulse.reacted && pulse.mediaType !== 'video' && (
           <div className={pulse.comments.length === 0 ? 'border-t border-gray-100 pt-2 mb-1.5' : 'mb-1.5'}>
             {openReactId === pulse.id ? (
               <div className="flex gap-2">
@@ -1289,33 +1324,40 @@ export default function CerneApp() {
         {tab === 'feed' && !activeConvo && (
           <div className="flex flex-col gap-3">
             <div className="flex gap-3 overflow-x-auto pb-1 -mt-1">
-              {stories.find((s) => s.authorId === userId) ? (
-                <button onClick={() => openStory(stories.find((s) => s.authorId === userId))} className="text-center flex-shrink-0">
-                  <div className="w-14 h-14 rounded-full border-2 border-rose-400 flex items-center justify-center">
-                    <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-medium">EU</div>
-                  </div>
-                  <p className="text-[11px] mt-1">seu</p>
-                </button>
-              ) : (
-                <button onClick={() => openCreator('momento')} className="text-center flex-shrink-0">
-                  <div className="w-14 h-14 rounded-full border-[1.5px] border-dashed border-gray-300 flex items-center justify-center">
-                    <Plus className="w-5 h-5 text-gray-400" />
-                  </div>
-                  <p className="text-[11px] mt-1">seu</p>
-                </button>
-              )}
-              {stories
-                .filter((s) => s.authorId !== userId)
-                .map((s) => (
-                  <button key={s.id} onClick={() => openStory(s)} className="text-center flex-shrink-0">
-                    <div className={`w-14 h-14 rounded-full border-2 flex items-center justify-center ${s.viewedByMe ? 'border-gray-200' : 'border-rose-400'}`}>
-                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
-                        {s.authorName.slice(0, 2).toUpperCase()}
-                      </div>
-                    </div>
-                    <p className="text-[11px] mt-1">{s.authorName}</p>
-                  </button>
-                ))}
+              {(() => {
+                const groups = getStoryGroups();
+                const ownGroup = groups.find((g) => g.authorId === userId);
+                const otherGroups = groups.filter((g) => g.authorId !== userId);
+                return (
+                  <>
+                    {ownGroup ? (
+                      <button onClick={() => openStoryGroup(ownGroup)} className="text-center flex-shrink-0">
+                        <div className="w-14 h-14 rounded-full border-2 border-rose-400 flex items-center justify-center">
+                          <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-medium">EU</div>
+                        </div>
+                        <p className="text-[11px] mt-1">seu</p>
+                      </button>
+                    ) : (
+                      <button onClick={() => openCreator('momento')} className="text-center flex-shrink-0">
+                        <div className="w-14 h-14 rounded-full border-[1.5px] border-dashed border-gray-300 flex items-center justify-center">
+                          <Plus className="w-5 h-5 text-gray-400" />
+                        </div>
+                        <p className="text-[11px] mt-1">seu</p>
+                      </button>
+                    )}
+                    {otherGroups.map((g) => (
+                      <button key={g.authorId} onClick={() => openStoryGroup(g)} className="text-center flex-shrink-0">
+                        <div className={`w-14 h-14 rounded-full border-2 flex items-center justify-center ${g.allViewed ? 'border-gray-200' : 'border-rose-400'}`}>
+                          <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
+                            {g.authorName.slice(0, 2).toUpperCase()}
+                          </div>
+                        </div>
+                        <p className="text-[11px] mt-1">{g.authorName}</p>
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
             </div>
 
             {feedError && (
@@ -1674,20 +1716,28 @@ export default function CerneApp() {
         </div>
       )}
 
-      {viewingStory && (
+      {viewingStoryGroup && (
         <div className="absolute inset-0 bg-black flex flex-col">
+          <div className="flex gap-1 px-3 pt-3">
+            {viewingStoryGroup.items.map((_, i) => (
+              <div key={i} className="flex-1 h-[3px] bg-white/30 rounded-full overflow-hidden">
+                <div className={`h-full bg-white ${i <= viewingStoryIndex ? 'w-full' : 'w-0'}`} />
+              </div>
+            ))}
+          </div>
+
           <div className="flex items-center justify-between p-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-medium">
-                {viewingStory.authorId === userId ? 'EU' : viewingStory.authorName.slice(0, 2).toUpperCase()}
+                {viewingStoryGroup.authorId === userId ? 'EU' : viewingStoryGroup.authorName.slice(0, 2).toUpperCase()}
               </div>
-              <span className="text-sm text-white font-medium">{viewingStory.authorId === userId ? 'seu momento' : viewingStory.authorName}</span>
+              <span className="text-sm text-white font-medium">{viewingStoryGroup.authorId === userId ? 'seu momento' : viewingStoryGroup.authorName}</span>
             </div>
             <div className="flex items-center gap-3">
-              {viewingStory.authorId === userId && (
+              {viewingStoryGroup.authorId === userId && (
                 <MoreVertical className="w-5 h-5 text-white cursor-pointer" onClick={() => setStoryMenuOpen((v) => !v)} />
               )}
-              <X className="w-5 h-5 text-white cursor-pointer" onClick={() => { setViewingStory(null); setStoryMenuOpen(false); }} />
+              <X className="w-5 h-5 text-white cursor-pointer" onClick={() => { setViewingStoryGroup(null); setStoryMenuOpen(false); }} />
             </div>
           </div>
 
@@ -1695,7 +1745,7 @@ export default function CerneApp() {
             <div className="absolute inset-0 flex items-end justify-center" onClick={() => setStoryMenuOpen(false)}>
               <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
                 <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
-                <button onClick={() => deleteStory(viewingStory.id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
+                <button onClick={() => deleteStory(viewingStoryGroup.items[viewingStoryIndex].id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
                   <Trash2 className="w-[18px] h-[18px]" /> Apagar momento
                 </button>
                 <button onClick={openHideList} className="flex items-center gap-3 py-3 text-sm w-full text-left">
@@ -1708,15 +1758,24 @@ export default function CerneApp() {
             </div>
           )}
 
-          <div className="flex-1 flex items-center justify-center">
-            {viewingStory.mediaType === 'video' ? (
-              <video src={viewingStory.mediaUrl} className="max-h-full max-w-full object-contain" controls autoPlay />
+          <div className="flex-1 relative flex items-center justify-center">
+            {viewingStoryGroup.items[viewingStoryIndex].mediaType === 'video' ? (
+              <video
+                key={viewingStoryGroup.items[viewingStoryIndex].id}
+                src={viewingStoryGroup.items[viewingStoryIndex].mediaUrl}
+                className="max-h-full max-w-full object-contain"
+                autoPlay
+                playsInline
+                onEnded={() => goToStoryStep(1)}
+              />
             ) : (
-              <img src={viewingStory.mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
+              <img src={viewingStoryGroup.items[viewingStoryIndex].mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
             )}
+            <button onClick={() => goToStoryStep(-1)} className="absolute left-0 top-0 h-full w-1/3" aria-label="Momento anterior" />
+            <button onClick={() => goToStoryStep(1)} className="absolute right-0 top-0 h-full w-2/3" aria-label="Próximo momento" />
           </div>
 
-          {viewingStory.authorId === userId && (
+          {viewingStoryGroup.authorId === userId && (
             <div className="bg-gray-900 p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Eye className="w-4 h-4 text-gray-300" />
