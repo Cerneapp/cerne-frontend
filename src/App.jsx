@@ -207,6 +207,22 @@ export default function CerneApp() {
     }
   }
 
+  // Atualiza as mensagens automaticamente enquanto uma conversa está aberta
+  useEffect(() => {
+    if (!activeChatId || !token) return;
+    const interval = setInterval(() => {
+      apiFetch(`/matches/${activeChatId}/messages`, {}, token)
+        .then((msgs) => {
+          setMessagesByChat((prev) => ({
+            ...prev,
+            [activeChatId]: msgs.map((m) => ({ from: m.senderId === userId ? 'me' : 'them', text: m.text })),
+          }));
+        })
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [activeChatId, token, userId]);
+
   async function handleAuthSubmit(e) {
     e.preventDefault();
     setAuthError('');
@@ -297,8 +313,12 @@ export default function CerneApp() {
   }
 
   async function removeOwnPulse(id) {
-    setPulses((prev) => prev.filter((p) => p.id !== id));
-    // Apagar de verdade no servidor fica como próximo passo (endpoint DELETE /pulses/:id)
+    try {
+      await apiFetch(`/pulses/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }, token);
+      setPulses((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      setFeedError('Não foi possível apagar o pulse.');
+    }
   }
 
   async function sendChatMessage(matchId) {
