@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut
+  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video
 } from 'lucide-react';
 
 const API_URL = 'https://cerne-backend.onrender.com';
@@ -130,6 +130,7 @@ export default function CerneApp() {
   const [createTags, setCreateTags] = useState(['trilha']);
   const [createImageUrl, setCreateImageUrl] = useState(null);
   const [createImagePreview, setCreateImagePreview] = useState(null);
+  const [createMediaType, setCreateMediaType] = useState('image');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [matchOpen, setMatchOpen] = useState(false);
@@ -137,6 +138,13 @@ export default function CerneApp() {
 
   const [exploreMsg, setExploreMsg] = useState('');
   const [savedToast, setSavedToast] = useState(false);
+
+  const [stories, setStories] = useState([]);
+  const [viewingStory, setViewingStory] = useState(null);
+  const [storyViewers, setStoryViewers] = useState(null);
+  const [creatingStory, setCreatingStory] = useState(false);
+  const [profileGridTab, setProfileGridTab] = useState('pulses');
+  const [interests, setInterests] = useState([]);
 
   // Tenta recuperar sessão salva ao abrir o app
   useEffect(() => {
@@ -170,7 +178,7 @@ export default function CerneApp() {
         intent: user.intent,
       });
       setScreen('app');
-      await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok)]);
+      await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests()]);
     } catch (err) {
       localStorage.removeItem('cerne_token');
       localStorage.removeItem('cerne_userId');
@@ -193,12 +201,31 @@ export default function CerneApp() {
           tags: p.tags.map((t) => t.interest.name),
           hasPhoto: !!p.mediaUrl,
           mediaUrl: p.mediaUrl,
+          mediaType: p.mediaType || 'image',
           reacted: p.reactions.some((r) => r.userId === uid),
           own: p.authorId === uid,
         }))
       );
     } catch (err) {
       setFeedError('Não foi possível carregar o feed. O servidor pode estar acordando, tente de novo em um minuto.');
+    }
+  }
+
+  async function loadStories(uid = userId, tok = token) {
+    try {
+      const raw = await apiFetch(`/stories?viewerId=${uid}`, {}, tok);
+      setStories(raw);
+    } catch (err) {
+      // sem momentos não quebra o app
+    }
+  }
+
+  async function loadInterests() {
+    try {
+      const raw = await apiFetch('/interests', {});
+      setInterests(raw);
+    } catch (err) {
+      // explorar fica vazio se falhar, sem quebrar o app
     }
   }
 
@@ -359,6 +386,8 @@ export default function CerneApp() {
   async function handlePhotoSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
+    const isVideo = file.type.startsWith('video');
+    setCreateMediaType(isVideo ? 'video' : 'image');
     setCreateImagePreview(URL.createObjectURL(file));
     setUploadingPhoto(true);
     try {
@@ -366,13 +395,52 @@ export default function CerneApp() {
       formData.append('file', file);
       const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'erro ao enviar foto');
+      if (!res.ok) throw new Error(data.error || 'erro ao enviar arquivo');
       setCreateImageUrl(data.url);
     } catch (err) {
-      setFeedError('Não foi possível enviar a foto: ' + err.message);
+      setFeedError('Não foi possível enviar o arquivo: ' + err.message);
       setCreateImagePreview(null);
     } finally {
       setUploadingPhoto(false);
+    }
+  }
+
+  async function handleStoryFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCreatingStory(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'erro ao enviar momento');
+      await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: data.url }) }, token);
+      await loadStories();
+    } catch (err) {
+      setFeedError('Não foi possível publicar o momento: ' + err.message);
+    } finally {
+      setCreatingStory(false);
+    }
+  }
+
+  async function openStory(story) {
+    setViewingStory(story);
+    setStoryViewers(null);
+    if (story.authorId === userId) {
+      try {
+        const data = await apiFetch(`/stories/${story.id}/viewers?authorId=${userId}`, {}, token);
+        setStoryViewers(data);
+      } catch (err) {
+        setStoryViewers({ count: 0, viewers: [] });
+      }
+    } else {
+      try {
+        await apiFetch(`/stories/${story.id}/view`, { method: 'POST', body: JSON.stringify({ viewerId: userId }) }, token);
+        setStories((prev) => prev.map((s) => (s.id === story.id ? { ...s, viewedByMe: true } : s)));
+      } catch (err) {
+        // não bloqueia a visualização se a marcação falhar
+      }
     }
   }
 
@@ -381,13 +449,14 @@ export default function CerneApp() {
     try {
       await apiFetch(
         '/pulses',
-        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags, mediaUrl: createImageUrl }) },
+        { method: 'POST', body: JSON.stringify({ authorId: userId, text: createText, tagNames: createTags, mediaUrl: createImageUrl, mediaType: createMediaType }) },
         token
       );
       setCreateText('');
       setCreateTags(['trilha']);
       setCreateImageUrl(null);
       setCreateImagePreview(null);
+      setCreateMediaType('image');
       setCreateOpen(false);
       await loadFeed();
     } catch (err) {
@@ -705,6 +774,37 @@ export default function CerneApp() {
       <div className="flex-1 overflow-y-auto p-4">
         {tab === 'feed' && !activeConvo && (
           <div className="flex flex-col gap-3">
+            <div className="flex gap-3 overflow-x-auto pb-1 -mt-1">
+              {stories.find((s) => s.authorId === userId) ? (
+                <button onClick={() => openStory(stories.find((s) => s.authorId === userId))} className="text-center flex-shrink-0">
+                  <div className="w-14 h-14 rounded-full border-2 border-rose-400 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-medium">EU</div>
+                  </div>
+                  <p className="text-[11px] mt-1">seu</p>
+                </button>
+              ) : (
+                <label className="text-center flex-shrink-0 cursor-pointer">
+                  <div className="w-14 h-14 rounded-full border-[1.5px] border-dashed border-gray-300 flex items-center justify-center">
+                    {creatingStory ? <span className="text-[10px] text-gray-400">...</span> : <Plus className="w-5 h-5 text-gray-400" />}
+                  </div>
+                  <p className="text-[11px] mt-1">seu</p>
+                  <input type="file" accept="image/*,video/*" onChange={handleStoryFileSelect} className="hidden" />
+                </label>
+              )}
+              {stories
+                .filter((s) => s.authorId !== userId)
+                .map((s) => (
+                  <button key={s.id} onClick={() => openStory(s)} className="text-center flex-shrink-0">
+                    <div className={`w-14 h-14 rounded-full border-2 flex items-center justify-center ${s.viewedByMe ? 'border-gray-200' : 'border-rose-400'}`}>
+                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
+                        {s.authorName.slice(0, 2).toUpperCase()}
+                      </div>
+                    </div>
+                    <p className="text-[11px] mt-1">{s.authorName}</p>
+                  </button>
+                ))}
+            </div>
+
             {feedError && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
                 <span>{feedError}</span>
@@ -731,7 +831,11 @@ export default function CerneApp() {
 
                   {pulse.hasPhoto && (
                     <div className="w-full h-44 bg-gray-100 rounded-lg overflow-hidden mb-2">
-                      <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
+                      {pulse.mediaType === 'video' ? (
+                        <video src={pulse.mediaUrl} controls className="w-full h-full object-cover" />
+                      ) : (
+                        <img src={pulse.mediaUrl} alt="" className="w-full h-full object-cover" />
+                      )}
                     </div>
                   )}
 
@@ -779,10 +883,14 @@ export default function CerneApp() {
               <Search className="w-4 h-4 text-gray-400" />
               <span className="text-sm text-gray-400">Buscar interesses, pessoas...</span>
             </div>
-            <p className="text-xs text-gray-400 mb-2">em alta essa semana</p>
+            <p className="text-xs text-gray-400 mb-2">comunidades com mais pulses</p>
+            {interests.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-8">Ainda não tem pulses com tags suficientes pra formar uma comunidade.</p>
+            )}
             <div className="flex flex-col gap-2">
-              {COMMUNITIES.map((c) => {
-                const s = COMMUNITY_STYLES[c.style];
+              {interests.map((c, i) => {
+                const styleKeys = ['blue', 'emerald', 'amber', 'rose'];
+                const s = COMMUNITY_STYLES[styleKeys[i % styleKeys.length]];
                 return (
                   <button key={c.name} onClick={() => setExploreMsg(`Em breve: feed dedicado a #${c.name}`)} className="flex items-center gap-3 border border-gray-200 rounded-xl p-3 text-left">
                     <div className={`w-9 h-9 rounded-full ${s.bg} ${s.text} flex items-center justify-center`}>
@@ -790,7 +898,7 @@ export default function CerneApp() {
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.count}</p>
+                      <p className="text-xs text-gray-400">{c.pulseCount} {c.pulseCount === 1 ? 'pulse' : 'pulses'}</p>
                     </div>
                   </button>
                 );
@@ -848,6 +956,22 @@ export default function CerneApp() {
                 className="text-center text-base font-medium border-none focus:outline-none"
               />
             </div>
+
+            <div className="flex justify-around bg-gray-50 rounded-xl py-3 mb-4">
+              <div className="text-center">
+                <p className="text-base font-medium">{conversations.length}</p>
+                <p className="text-[11px] text-gray-400">matches</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-medium">{profile.interests.length}</p>
+                <p className="text-[11px] text-gray-400">comunidades</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-medium">{pulses.filter((p) => p.own).length}</p>
+                <p className="text-[11px] text-gray-400">pulses</p>
+              </div>
+            </div>
+
             <p className="text-xs text-gray-400 mb-1">bio</p>
             <textarea
               value={profile.bio}
@@ -873,9 +997,46 @@ export default function CerneApp() {
                 );
               })}
             </div>
-            <button onClick={saveProfile} className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium">
+            <button onClick={saveProfile} className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium mb-5">
               {savedToast ? 'Salvo!' : 'Salvar alterações'}
             </button>
+
+            <div className="flex border-t border-gray-100">
+              <button
+                onClick={() => setProfileGridTab('pulses')}
+                className={`flex-1 text-center py-2.5 ${profileGridTab === 'pulses' ? 'border-b-2 border-rose-500 text-rose-600' : 'border-b-2 border-transparent text-gray-400'}`}
+              >
+                <Camera className="w-4 h-4 inline" />
+              </button>
+              <button
+                onClick={() => setProfileGridTab('reels')}
+                className={`flex-1 text-center py-2.5 ${profileGridTab === 'reels' ? 'border-b-2 border-rose-500 text-rose-600' : 'border-b-2 border-transparent text-gray-400'}`}
+              >
+                <Video className="w-4 h-4 inline" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {pulses
+                .filter((p) => p.own && (profileGridTab === 'reels' ? p.mediaType === 'video' : true))
+                .map((p) => (
+                  <div key={p.id} className="h-24 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                    {p.mediaUrl ? (
+                      p.mediaType === 'video' ? (
+                        <video src={p.mediaUrl} className="w-full h-full object-cover" />
+                      ) : (
+                        <img src={p.mediaUrl} alt="" className="w-full h-full object-cover" />
+                      )
+                    ) : (
+                      <p className="text-[11px] text-gray-400 p-2 line-clamp-3">{p.text}</p>
+                    )}
+                  </div>
+                ))}
+              {pulses.filter((p) => p.own && (profileGridTab === 'reels' ? p.mediaType === 'video' : true)).length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-6 col-span-2">
+                  {profileGridTab === 'reels' ? 'Ainda sem reels.' : 'Ainda sem pulses.'}
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -910,7 +1071,7 @@ export default function CerneApp() {
           <div className="flex justify-between items-center mb-4">
             <X
               className="w-5 h-5 text-gray-500 cursor-pointer"
-              onClick={() => { setCreateOpen(false); setCreateImageUrl(null); setCreateImagePreview(null); }}
+              onClick={() => { setCreateOpen(false); setCreateImageUrl(null); setCreateImagePreview(null); setCreateMediaType('image'); }}
             />
             <span className="text-sm font-medium">Novo pulse</span>
             <button
@@ -932,13 +1093,17 @@ export default function CerneApp() {
 
           {createImagePreview && (
             <div className="relative w-full h-40 bg-gray-100 rounded-lg overflow-hidden mb-4">
-              <img src={createImagePreview} alt="" className="w-full h-full object-cover" />
+              {createMediaType === 'video' ? (
+                <video src={createImagePreview} className="w-full h-full object-cover" muted />
+              ) : (
+                <img src={createImagePreview} alt="" className="w-full h-full object-cover" />
+              )}
               {uploadingPhoto && (
-                <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-gray-600">Enviando foto...</div>
+                <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-gray-600">Enviando...</div>
               )}
               <X
                 className="absolute top-2 right-2 w-5 h-5 bg-white rounded-full p-1 text-gray-600 cursor-pointer"
-                onClick={() => { setCreateImageUrl(null); setCreateImagePreview(null); }}
+                onClick={() => { setCreateImageUrl(null); setCreateImagePreview(null); setCreateMediaType('image'); }}
               />
             </div>
           )}
@@ -951,9 +1116,40 @@ export default function CerneApp() {
 
           <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer border-t border-gray-100 pt-3">
             <Camera className="w-5 h-5" />
-            {createImagePreview ? 'Trocar foto' : 'Adicionar foto'}
-            <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+            {createImagePreview ? 'Trocar mídia' : 'Adicionar foto ou vídeo (reel)'}
+            <input type="file" accept="image/*,video/*" onChange={handlePhotoSelect} className="hidden" />
           </label>
+        </div>
+      )}
+
+      {viewingStory && (
+        <div className="absolute inset-0 bg-black flex flex-col">
+          <div className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-medium">
+                {viewingStory.authorId === userId ? 'EU' : viewingStory.authorName.slice(0, 2).toUpperCase()}
+              </div>
+              <span className="text-sm text-white font-medium">{viewingStory.authorId === userId ? 'seu momento' : viewingStory.authorName}</span>
+            </div>
+            <X className="w-5 h-5 text-white cursor-pointer" onClick={() => setViewingStory(null)} />
+          </div>
+
+          <div className="flex-1 flex items-center justify-center">
+            <img src={viewingStory.mediaUrl} alt="" className="max-h-full max-w-full object-contain" />
+          </div>
+
+          {viewingStory.authorId === userId && (
+            <div className="bg-gray-900 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Eye className="w-4 h-4 text-gray-300" />
+                <span className="text-sm text-white font-medium">{storyViewers ? storyViewers.count : '...'} visualizações</span>
+                <span className="text-xs text-gray-500">· só você vê isso</span>
+              </div>
+              {storyViewers?.viewers.slice(0, 5).map((v) => (
+                <p key={v.id} className="text-sm text-gray-300 py-1">{v.name}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
