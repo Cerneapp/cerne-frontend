@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Home, Compass, Plus, MessageCircle, User, Heart, Camera, X,
-  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical, RefreshCw, Image as ImageIcon
+  ChevronLeft, Sparkles, Send, Search, Bell, Trash2, Check, Users, LogOut, Eye, Video, MoreVertical, RefreshCw, Image as ImageIcon, Share2, Link as LinkIcon, Download
 } from 'lucide-react';
 
 const API_URL = 'https://cerne-backend.onrender.com';
@@ -143,6 +143,7 @@ export default function CerneApp() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState('');
   const [facingMode, setFacingMode] = useState('user');
   const [isRecording, setIsRecording] = useState(false);
@@ -169,6 +170,8 @@ export default function CerneApp() {
   const [viewingOwnPulse, setViewingOwnPulse] = useState(null);
   const [pulseViewers, setPulseViewers] = useState(null);
   const [sharingPulse, setSharingPulse] = useState(null);
+  const [shareSubview, setShareSubview] = useState('main');
+  const [shareCopied, setShareCopied] = useState(false);
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   const [interests, setInterests] = useState([]);
@@ -504,6 +507,49 @@ export default function CerneApp() {
     }
   }
 
+  async function nativeShare(pulse) {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Cerne', text: pulse.text || 'Veja esse pulse no Cerne', url: window.location.origin });
+        setSharingPulse(null);
+      } catch (err) {
+        // usuário cancelou o compartilhamento, sem problema
+      }
+    } else {
+      setFeedError('Compartilhamento direto não é suportado nesse navegador. Use "Copiar link".');
+    }
+  }
+
+  async function copyPulseLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.origin);
+      setShareCopied(true);
+      setTimeout(() => {
+        setShareCopied(false);
+        setSharingPulse(null);
+      }, 1200);
+    } catch (err) {
+      setFeedError('Não foi possível copiar o link.');
+    }
+  }
+
+  function downloadPulseMedia(pulse) {
+    if (!pulse.mediaUrl) return;
+    window.open(pulse.mediaUrl, '_blank');
+    setSharingPulse(null);
+  }
+
+  async function repostAsMomento(pulse) {
+    if (!pulse.mediaUrl) return;
+    try {
+      await apiFetch('/stories', { method: 'POST', body: JSON.stringify({ authorId: userId, mediaUrl: pulse.mediaUrl, mediaType: pulse.mediaType }) }, token);
+      await loadStories();
+      setSharingPulse(null);
+    } catch (err) {
+      setFeedError('Não foi possível adicionar ao momento: ' + err.message);
+    }
+  }
+
   async function submitReaction(pulse) {
     if (!reactDraft.trim()) return;
     const commentText = reactDraft;
@@ -543,12 +589,14 @@ export default function CerneApp() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: !!wantsAudio });
       streamRef.current = stream;
+      setCameraStream(stream);
       setCameraOn(true);
     } catch (err) {
       if (wantsAudio) {
         try {
           const videoOnlyStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: false });
           streamRef.current = videoOnlyStream;
+          setCameraStream(videoOnlyStream);
           setCameraOn(true);
           setCameraError('Gravando sem áudio — permissão de microfone não foi concedida.');
           return;
@@ -558,16 +606,19 @@ export default function CerneApp() {
       }
       setCameraError('Não conseguimos acessar sua câmera. Escolha um arquivo da galeria abaixo.');
       setCameraOn(false);
+      setCameraStream(null);
     }
   }
 
-  // Conecta a câmera ao elemento de vídeo só depois que ele já existe na tela
-  // (corrige a tela preta que acontecia por causa do timing do React)
+  // Conecta a câmera ao elemento de vídeo toda vez que um stream novo chega —
+  // depender só de "câmera ligada" (true/false) não bastava, porque trocar de
+  // aba (Pulse/Momento/Reel) pede um stream novo sem mudar esse booleano,
+  // e o vídeo ficava preto mostrando o stream antigo (já parado).
   useEffect(() => {
-    if (cameraOn && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
+    if (cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
     }
-  }, [cameraOn]);
+  }, [cameraStream]);
 
   function flipCamera() {
     const next = facingMode === 'user' ? 'environment' : 'user';
@@ -595,6 +646,7 @@ export default function CerneApp() {
   function closeCreator() {
     stopCameraTracksOnly();
     setCameraOn(false);
+    setCameraStream(null);
     setIsRecording(false);
     clearInterval(recordingIntervalRef.current);
     setRecordingSeconds(0);
@@ -654,6 +706,7 @@ export default function CerneApp() {
       }
       stopCameraTracksOnly();
       setCameraOn(false);
+      setCameraStream(null);
       setCreateMediaType('image');
       uploadCapturedBlob(blob, 'photo.jpg');
     }, 'image/jpeg', 0.9);
@@ -670,6 +723,7 @@ export default function CerneApp() {
     recorder.onstop = () => {
       stopCameraTracksOnly();
       setCameraOn(false);
+      setCameraStream(null);
       if (recordedChunksRef.current.length === 0) {
         setFeedError('A gravação ficou muito curta, tenta de novo segurando um pouco mais.');
         startCamera(facingMode, true);
@@ -700,6 +754,7 @@ export default function CerneApp() {
     setCreateMediaType(isVideo ? 'video' : 'image');
     stopCameraTracksOnly();
     setCameraOn(false);
+    setCameraStream(null);
     uploadCapturedBlob(file, file.name);
   }
 
@@ -1184,7 +1239,7 @@ export default function CerneApp() {
                           <p className="text-xs">
                             <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
                             <span className="text-gray-600">{c.text}</span>
-                            {c.userId === userId && c.likeCount > 0 && (
+                            {c.likeCount > 0 && (
                               <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
                             )}
                           </p>
@@ -1663,20 +1718,59 @@ export default function CerneApp() {
       )}
 
       {sharingPulse && (
-        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setSharingPulse(null)}>
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => { setSharingPulse(null); setShareSubview('main'); }}>
           <div className="bg-white rounded-t-2xl p-5 w-full max-h-[80%] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
-            <p className="text-sm font-medium mb-3">Enviar pra</p>
-            {conversations.length === 0 && <p className="text-xs text-gray-400 text-center py-8">Você ainda não tem matches pra enviar.</p>}
-            <div className="flex flex-col gap-1">
-              {conversations.map((c) => (
-                <button key={c.id} onClick={() => shareToMatch(sharingPulse, c.id)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
-                  <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
-                  <span className="flex-1 text-sm">{c.name}</span>
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setSharingPulse(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium mt-3">
+
+            {shareSubview === 'main' ? (
+              <>
+                <p className="text-sm font-medium mb-3">Compartilhar</p>
+                <div className="flex flex-col gap-1 mb-3">
+                  <button onClick={() => setShareSubview('matches')} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                    <Send className="w-[18px] h-[18px] text-gray-600" />
+                    <span className="text-sm">Enviar pra um match</span>
+                  </button>
+                  <button onClick={() => nativeShare(sharingPulse)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                    <Share2 className="w-[18px] h-[18px] text-gray-600" />
+                    <span className="text-sm">Compartilhar (WhatsApp e outros)</span>
+                  </button>
+                  {sharingPulse.mediaUrl && (
+                    <button onClick={() => repostAsMomento(sharingPulse)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                      <Plus className="w-[18px] h-[18px] text-gray-600" />
+                      <span className="text-sm">Adicionar ao seu momento</span>
+                    </button>
+                  )}
+                  <button onClick={copyPulseLink} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                    <LinkIcon className="w-[18px] h-[18px] text-gray-600" />
+                    <span className="text-sm">{shareCopied ? 'Copiado!' : 'Copiar link'}</span>
+                  </button>
+                  {sharingPulse.mediaUrl && (
+                    <button onClick={() => downloadPulseMedia(sharingPulse)} className="flex items-center gap-3 py-2.5 text-left w-full">
+                      <Download className="w-[18px] h-[18px] text-gray-600" />
+                      <span className="text-sm">Baixar</span>
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setShareSubview('main')} />
+                  <p className="text-sm font-medium">Enviar pra</p>
+                </div>
+                {conversations.length === 0 && <p className="text-xs text-gray-400 text-center py-8">Você ainda não tem matches pra enviar.</p>}
+                <div className="flex flex-col gap-1 mb-3">
+                  {conversations.map((c) => (
+                    <button key={c.id} onClick={() => { shareToMatch(sharingPulse, c.id); setShareSubview('main'); }} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                      <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                      <span className="flex-1 text-sm">{c.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <button onClick={() => { setSharingPulse(null); setShareSubview('main'); }} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
               Cancelar
             </button>
           </div>
