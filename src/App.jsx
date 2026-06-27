@@ -79,12 +79,33 @@ function CerneMark({ size = 28 }) {
   );
 }
 
-function Avatar({ initials, intentKey, size = 'w-9 h-9 text-sm' }) {
+function Avatar({ initials, intentKey, size = 'w-9 h-9 text-sm', avatarUrl }) {
   const s = INTENT_STYLES[intentKey] || INTENT_STYLES.ambos;
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt="" className={`${size} rounded-full object-cover flex-shrink-0`} />;
+  }
   return (
     <div className={`${size} ${s.bg} ${s.text} rounded-full flex items-center justify-center font-medium flex-shrink-0`}>
       {initials}
     </div>
+  );
+}
+
+function VerifiedBadge({ size = 14, animated = false }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); window.cerneShowToast?.('Conta verificada pelo Cerne'); }}
+      title="Conta verificada pelo Cerne"
+      className={`inline-flex items-center justify-center flex-shrink-0 ${animated ? 'cerne-badge-animated' : ''}`}
+      style={{ width: size, height: size }}
+      aria-label="Conta verificada pelo Cerne"
+    >
+      <svg width={size} height={size} viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="92" fill="#9f1239" />
+        <path d="M40,100 L72,100 L86,58 L104,142 L118,100 L160,100" fill="none" stroke="white" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
   );
 }
 
@@ -130,7 +151,7 @@ export default function CerneApp() {
   const [userId, setUserId] = useState(null);
 
   const [obStep, setObStep] = useState(0);
-  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos', invisibleMode: false, verificationStatus: 'none' });
+  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos', invisibleMode: false, verificationStatus: 'none', avatarUrl: null });
 
   const [tab, setTab] = useState('feed');
   const [pulses, setPulses] = useState([]);
@@ -154,6 +175,7 @@ export default function CerneApp() {
   const [createMediaType, setCreateMediaType] = useState('image');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [toast, setToast] = useState('');
   const toastTimerRef = useRef(null);
   const [cameraOn, setCameraOn] = useState(false);
@@ -230,6 +252,7 @@ export default function CerneApp() {
         intent: user.intent,
         invisibleMode: user.invisibleMode,
         verificationStatus: user.verificationStatus || 'none',
+        avatarUrl: user.avatarUrl || null,
       });
       setScreen('app');
       await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests()]);
@@ -249,6 +272,8 @@ export default function CerneApp() {
           id: p.id,
           author: p.author.name,
           authorId: p.authorId,
+          authorAvatarUrl: p.author.avatarUrl,
+          authorVerified: p.author.verified,
           intentKey: p.author.intent,
           time: timeAgo(p.createdAt),
           text: p.text,
@@ -257,8 +282,8 @@ export default function CerneApp() {
           mediaUrl: p.mediaUrl,
           mediaType: p.mediaType || 'image',
           comments: [
-            ...p.reactions.map((r) => ({ key: `r-${r.userId}`, commentId: null, userId: r.userId, name: r.user.name, intentKey: r.user.intent, text: r.comment, createdAt: r.createdAt, likedByMe: false })),
-            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid), likeCount: c.likes.length })),
+            ...p.reactions.map((r) => ({ key: `r-${r.userId}`, commentId: null, userId: r.userId, name: r.user.name, intentKey: r.user.intent, avatarUrl: r.user.avatarUrl, verified: r.user.verified, text: r.comment, createdAt: r.createdAt, likedByMe: false })),
+            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, avatarUrl: c.user.avatarUrl, verified: c.user.verified, text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid), likeCount: c.likes.length })),
           ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
           likedByMe: p.likes.some((l) => l.userId === uid),
           likeCount: p.likes.length,
@@ -300,6 +325,8 @@ export default function CerneApp() {
             otherId: other.id,
             name: other.name,
             intentKey: other.intent || 'ambos',
+            avatarUrl: other.avatarUrl,
+            verified: other.verified,
             lastMessage: m.messages[0]?.text || 'vocês deram match. diga olá!',
           };
         })
@@ -446,6 +473,7 @@ export default function CerneApp() {
           id: p.id,
           author: data.name,
           authorId: data.id,
+          authorAvatarUrl: data.avatarUrl,
           intentKey: data.intent,
           time: timeAgo(p.createdAt),
           text: p.text,
@@ -615,7 +643,7 @@ export default function CerneApp() {
       setPulses((prev) =>
         prev.map((p) =>
           p.id === pulse.id
-            ? { ...p, comments: [...p.comments, { key: `c-${Date.now()}`, commentId: null, userId, name: profile.name, intentKey: profile.intent, text, createdAt: new Date().toISOString(), likedByMe: false, likeCount: 0 }] }
+            ? { ...p, comments: [...p.comments, { key: `c-${Date.now()}`, commentId: null, userId, name: profile.name, intentKey: profile.intent, avatarUrl: profile.avatarUrl, verified: profile.verificationStatus === 'verified', text, createdAt: new Date().toISOString(), likedByMe: false, likeCount: 0 }] }
             : p
         )
       );
@@ -733,7 +761,7 @@ export default function CerneApp() {
       setPulses((prev) =>
         prev.map((p) =>
           p.id === pulse.id
-            ? { ...p, reacted: true, comments: [...p.comments, { key: `r-${userId}`, userId, name: profile.name, intentKey: profile.intent, text: commentText, createdAt: new Date().toISOString() }] }
+            ? { ...p, reacted: true, comments: [...p.comments, { key: `r-${userId}`, userId, name: profile.name, intentKey: profile.intent, avatarUrl: profile.avatarUrl, verified: profile.verificationStatus === 'verified', text: commentText, createdAt: new Date().toISOString() }] }
             : p
         )
       );
@@ -954,6 +982,11 @@ export default function CerneApp() {
     toastTimerRef.current = setTimeout(() => setToast(''), 5000);
   }
 
+  useEffect(() => {
+    window.cerneShowToast = showToast;
+    return () => { delete window.cerneShowToast; };
+  }, []);
+
   async function publishFromCreator() {
     if (!createImageUrl || publishing) return;
     if (creatorMode !== 'momento' && !createText.trim()) return;
@@ -985,7 +1018,7 @@ export default function CerneApp() {
   function getStoryGroups() {
     const map = {};
     for (const s of stories) {
-      if (!map[s.authorId]) map[s.authorId] = { authorId: s.authorId, authorName: s.authorName, authorIntent: s.authorIntent, items: [] };
+      if (!map[s.authorId]) map[s.authorId] = { authorId: s.authorId, authorName: s.authorName, authorIntent: s.authorIntent, authorAvatarUrl: s.authorAvatarUrl, authorVerified: s.authorVerified, items: [] };
       map[s.authorId].items.push(s);
     }
     return Object.values(map).map((g) => {
@@ -1105,6 +1138,26 @@ export default function CerneApp() {
       setTimeout(() => setSavedToast(false), 1600);
     } catch (err) {
       setFeedError('Não foi possível salvar.');
+    }
+  }
+
+  async function handleAvatarSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'erro ao enviar foto');
+      await apiFetch(`/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ avatarUrl: data.url }) }, token);
+      setProfile((p) => ({ ...p, avatarUrl: data.url }));
+      showToast('Foto de perfil atualizada!');
+    } catch (err) {
+      setFeedError('Não foi possível enviar a foto: ' + err.message);
+    } finally {
+      setAvatarUploading(false);
     }
   }
 
@@ -1450,10 +1503,13 @@ export default function CerneApp() {
       <div key={pulse.id} className="border border-gray-200 rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-2">
           <button onClick={() => openProfile(pulse.authorId)}>
-            <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} />
+            <Avatar initials={pulse.author.slice(0, 2).toUpperCase()} intentKey={pulse.intentKey} avatarUrl={pulse.authorAvatarUrl} />
           </button>
           <button className="flex-1 text-left" onClick={() => openProfile(pulse.authorId)}>
-            <p className="text-sm font-medium">{pulse.author}</p>
+            <p className="text-sm font-medium flex items-center gap-1">
+              {pulse.author}
+              {pulse.authorVerified && <VerifiedBadge size={13} />}
+            </p>
             <p className="text-xs text-gray-500">{pulse.time}</p>
           </button>
           {pulse.own ? (
@@ -1500,7 +1556,8 @@ export default function CerneApp() {
             {pulse.comments.map((c) => (
               <div key={c.key} className="flex items-start justify-between gap-2">
                 <p className="text-xs">
-                  <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
+                  <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>
+                  {c.verified && <VerifiedBadge size={11} />}{' '}
                   <span className="text-gray-600">{c.text}</span>
                   {c.likeCount > 0 && (
                     <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
@@ -1606,8 +1663,11 @@ export default function CerneApp() {
       {activeConvo && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-3 border-b border-gray-100">
           <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setActiveChatId(null)} />
-          <Avatar initials={activeConvo.name.slice(0, 2).toUpperCase()} intentKey={activeConvo.intentKey} size="w-8 h-8 text-xs" />
-          <span className="text-sm font-medium">{activeConvo.name}</span>
+          <Avatar initials={activeConvo.name.slice(0, 2).toUpperCase()} intentKey={activeConvo.intentKey} size="w-8 h-8 text-xs" avatarUrl={activeConvo.avatarUrl} />
+          <span className="text-sm font-medium flex items-center gap-1">
+            {activeConvo.name}
+            {activeConvo.verified && <VerifiedBadge size={13} />}
+          </span>
         </div>
       )}
 
@@ -1639,9 +1699,13 @@ export default function CerneApp() {
                     {otherGroups.map((g) => (
                       <button key={g.authorId} onClick={() => openStoryGroup(g)} className="text-center flex-shrink-0">
                         <div className={`w-14 h-14 rounded-full border-2 flex items-center justify-center ${g.allViewed ? 'border-gray-200' : 'border-rose-400'}`}>
-                          <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
-                            {g.authorName.slice(0, 2).toUpperCase()}
-                          </div>
+                          {g.authorAvatarUrl ? (
+                            <img src={g.authorAvatarUrl} alt="" className="w-12 h-12 rounded-full object-cover" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-medium">
+                              {g.authorName.slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
                         </div>
                         <p className="text-[11px] mt-1">{g.authorName}</p>
                       </button>
@@ -1715,9 +1779,12 @@ export default function CerneApp() {
             )}
             {conversations.map((c) => (
               <button key={c.id} onClick={() => openChat(c.id)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left">
-                <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} avatarUrl={c.avatarUrl} />
                 <div className="flex-1">
-                  <p className="text-sm font-medium">{c.name}</p>
+                  <p className="text-sm font-medium flex items-center gap-1">
+                    {c.name}
+                    {c.verified && <VerifiedBadge size={12} />}
+                  </p>
                   <p className="text-xs text-gray-500 truncate">{c.lastMessage}</p>
                 </div>
               </button>
@@ -1759,14 +1826,21 @@ export default function CerneApp() {
         {tab === 'profile' && (
           <div>
             <div className="text-center mb-4">
-              <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
+              <label className="relative inline-block cursor-pointer mb-2">
+                <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} size="w-16 h-16 text-lg" avatarUrl={profile.avatarUrl} />
+                <div className="absolute bottom-0 right-0 bg-gray-800 rounded-full p-1 border-2 border-white">
+                  <Camera className="w-3 h-3 text-white" />
+                </div>
+                <input type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
+              </label>
+              {avatarUploading && <p className="text-[11px] text-gray-400">Enviando foto...</p>}
               <div className="flex items-center justify-center gap-1.5">
                 <input
                   value={profile.name}
                   onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
                   className="text-center text-base font-medium border-none focus:outline-none"
                 />
-                {profile.verificationStatus === 'verified' && <Check className="w-4 h-4 text-blue-500 flex-shrink-0" />}
+                {profile.verificationStatus === 'verified' && <VerifiedBadge size={16} animated />}
               </div>
             </div>
 
@@ -2111,7 +2185,7 @@ export default function CerneApp() {
               const isHidden = hiddenUserIds.includes(c.otherId || c.id);
               return (
                 <div key={c.id} className="flex items-center gap-3 py-2.5 border-b border-gray-100">
-                  <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                  <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} avatarUrl={c.avatarUrl} />
                   <span className="flex-1 text-sm">{c.name}</span>
                   <button
                     onClick={() => toggleHidePerson(c.otherId || c.id)}
@@ -2171,7 +2245,7 @@ export default function CerneApp() {
                 <div className="flex flex-col gap-1 mb-3">
                   {conversations.map((c) => (
                     <button key={c.id} onClick={() => { shareToMatch(sharingPulse, c.id); setShareSubview('main'); }} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
-                      <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} />
+                      <Avatar initials={c.name.slice(0, 2).toUpperCase()} intentKey={c.intentKey} avatarUrl={c.avatarUrl} />
                       <span className="flex-1 text-sm">{c.name}</span>
                     </button>
                   ))}
@@ -2202,7 +2276,7 @@ export default function CerneApp() {
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Avatar initials={viewingOwnPulse.author.slice(0, 2).toUpperCase()} intentKey={viewingOwnPulse.intentKey} />
+              <Avatar initials={viewingOwnPulse.author.slice(0, 2).toUpperCase()} intentKey={viewingOwnPulse.intentKey} avatarUrl={viewingOwnPulse.authorAvatarUrl} />
               <div>
                 <p className="text-sm font-medium">{viewingOwnPulse.author}</p>
                 <p className="text-xs text-gray-500">{viewingOwnPulse.time}</p>
@@ -2276,10 +2350,10 @@ export default function CerneApp() {
             ) : (
               <>
                 <div className="text-center mb-4">
-                  <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
+                  <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-2" avatarUrl={viewingProfile.avatarUrl} />
                   <p className="text-base font-medium flex items-center justify-center gap-1.5">
                     {viewingProfile.name}
-                    {viewingProfile.verified && <Check className="w-4 h-4 text-blue-500" />}
+                    {viewingProfile.verified && <VerifiedBadge size={16} animated />}
                   </p>
                   {viewingProfile.bio && <p className="text-xs text-gray-500 mt-1 max-w-[260px] mx-auto">{viewingProfile.bio}</p>}
                 </div>
@@ -2401,7 +2475,7 @@ export default function CerneApp() {
               <div>
                 <p className="text-sm font-medium flex items-center gap-1.5">
                   Verificação de perfil
-                  {profile.verificationStatus === 'verified' && <Check className="w-4 h-4 text-blue-500" />}
+                  {profile.verificationStatus === 'verified' && <VerifiedBadge size={14} />}
                 </p>
                 <p className="text-xs text-gray-400">
                   {profile.verificationStatus === 'verified' && 'Seu perfil está verificado'}
@@ -2435,7 +2509,7 @@ export default function CerneApp() {
             <div className="flex flex-col gap-1">
               {blockedUsers.map((u) => (
                 <div key={u.id} className="flex items-center gap-3 py-2.5 border-b border-gray-100">
-                  <Avatar initials={u.name.slice(0, 2).toUpperCase()} intentKey={u.intent} />
+                  <Avatar initials={u.name.slice(0, 2).toUpperCase()} intentKey={u.intent} avatarUrl={u.avatarUrl} />
                   <span className="flex-1 text-sm">{u.name}</span>
                   <button onClick={() => unblockUser(u.id)} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500">
                     Desbloquear

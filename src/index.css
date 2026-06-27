@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@keyframes cerne-heartbeat {
+  0% { transform: scale(1); }
+  8% { transform: scale(1.18); }
+  16% { transform: scale(1); }
+  24% { transform: scale(1.12); }
+  32% { transform: scale(1); }
+  100% { transform: scale(1); }
+}
+.cerne-badge-animated {
+  animation: cerne-heartbeat 2.6s ease-in-out infinite;
+}
+.cerne-badge-animated:active,
+.cerne-badge-animated:hover {
+  animation-duration: 0.9s;
+}
