@@ -1556,8 +1556,7 @@ export default function CerneApp() {
             {pulse.comments.map((c) => (
               <div key={c.key} className="flex items-start justify-between gap-2">
                 <p className="text-xs">
-                  <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>
-                  {c.verified && <VerifiedBadge size={11} />}{' '}
+                  <button onClick={() => openProfile(c.userId)} className="font-medium">{c.name}</button>{' '}
                   <span className="text-gray-600">{c.text}</span>
                   {c.likeCount > 0 && (
                     <span className="text-[10px] text-gray-400 ml-1">· {c.likeCount} {c.likeCount === 1 ? 'curtida' : 'curtidas'}</span>
