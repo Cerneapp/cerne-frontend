@@ -104,6 +104,18 @@ function Chip({ label, selected, onClick }) {
 export default function CerneApp() {
   const [screen, setScreen] = useState('auth'); // auth | onboarding | app
   const [booting, setBooting] = useState(true);
+  const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('cerne_seen_intro'));
+  const [introStep, setIntroStep] = useState(0);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [verifyScreenOpen, setVerifyScreenOpen] = useState(false);
+  const [verifyCameraOn, setVerifyCameraOn] = useState(false);
+  const [verifySelfiePreview, setVerifySelfiePreview] = useState(null);
+  const [verifySelfieUrl, setVerifySelfieUrl] = useState(null);
+  const [verifyUploading, setVerifyUploading] = useState(false);
+  const [verifySubmitting, setVerifySubmitting] = useState(false);
+  const verifyVideoRef = useRef(null);
+  const verifyStreamRef = useRef(null);
 
   const [authMode, setAuthMode] = useState('login'); // login | signup | forgot | reset
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
@@ -118,7 +130,7 @@ export default function CerneApp() {
   const [userId, setUserId] = useState(null);
 
   const [obStep, setObStep] = useState(0);
-  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos', invisibleMode: false });
+  const [profile, setProfile] = useState({ name: '', bio: '', interests: ['fotografia'], intent: 'ambos', invisibleMode: false, verificationStatus: 'none' });
 
   const [tab, setTab] = useState('feed');
   const [pulses, setPulses] = useState([]);
@@ -217,6 +229,7 @@ export default function CerneApp() {
         interests: user.interests.map((i) => i.interest.name),
         intent: user.intent,
         invisibleMode: user.invisibleMode,
+        verificationStatus: user.verificationStatus || 'none',
       });
       setScreen('app');
       await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests()]);
@@ -366,12 +379,16 @@ export default function CerneApp() {
   async function handleAuthSubmit(e) {
     e.preventDefault();
     setAuthError('');
+    if (authMode === 'signup' && !acceptedTerms) {
+      setAuthError('Confirme que tem 18 anos ou mais e aceite os Termos de Uso pra continuar.');
+      return;
+    }
     setAuthLoading(true);
     try {
       const path = authMode === 'signup' ? '/auth/signup' : '/auth/login';
       const body =
         authMode === 'signup'
-          ? { name: authForm.name, email: authForm.email, password: authForm.password }
+          ? { name: authForm.name, email: authForm.email, password: authForm.password, acceptedTerms: true }
           : { email: authForm.email, password: authForm.password };
 
       const data = await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
@@ -500,6 +517,91 @@ export default function CerneApp() {
       setProfile((p) => ({ ...p, invisibleMode: next }));
     } catch (err) {
       setFeedError('Não foi possível atualizar o modo invisível.');
+    }
+  }
+
+  function finishIntro() {
+    localStorage.setItem('cerne_seen_intro', '1');
+    setShowIntro(false);
+  }
+
+  function stopVerifyCameraTracks() {
+    verifyStreamRef.current?.getTracks().forEach((t) => t.stop());
+    verifyStreamRef.current = null;
+  }
+
+  async function openVerifyScreen() {
+    setVerifyScreenOpen(true);
+    setVerifySelfiePreview(null);
+    setVerifySelfieUrl(null);
+    if (profile.verificationStatus === 'none' || profile.verificationStatus === 'rejected') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        verifyStreamRef.current = stream;
+        setVerifyCameraOn(true);
+      } catch (err) {
+        setVerifyCameraOn(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (verifyCameraOn && verifyVideoRef.current && verifyStreamRef.current) {
+      verifyVideoRef.current.srcObject = verifyStreamRef.current;
+    }
+  }, [verifyCameraOn]);
+
+  function closeVerifyScreen() {
+    stopVerifyCameraTracks();
+    setVerifyCameraOn(false);
+    setVerifyScreenOpen(false);
+  }
+
+  function captureVerifySelfie() {
+    if (!verifyVideoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = verifyVideoRef.current.videoWidth;
+    canvas.height = verifyVideoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(verifyVideoRef.current, 0, 0);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      stopVerifyCameraTracks();
+      setVerifyCameraOn(false);
+      setVerifySelfiePreview(URL.createObjectURL(blob));
+      setVerifyUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', blob, 'selfie.jpg');
+        const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'erro ao enviar selfie');
+        setVerifySelfieUrl(data.url);
+      } catch (err) {
+        setFeedError('Não foi possível enviar a selfie: ' + err.message);
+      } finally {
+        setVerifyUploading(false);
+      }
+    }, 'image/jpeg', 0.9);
+  }
+
+  function retakeVerifySelfie() {
+    setVerifySelfiePreview(null);
+    setVerifySelfieUrl(null);
+    openVerifyScreen();
+  }
+
+  async function submitVerification() {
+    if (!verifySelfieUrl) return;
+    setVerifySubmitting(true);
+    try {
+      await apiFetch(`/users/${userId}/verify`, { method: 'POST', body: JSON.stringify({ selfieUrl: verifySelfieUrl }) }, token);
+      setProfile((p) => ({ ...p, verificationStatus: 'pending' }));
+      showToast('Selfie enviada pra análise!');
+      closeVerifyScreen();
+    } catch (err) {
+      setFeedError('Não foi possível enviar a verificação: ' + err.message);
+    } finally {
+      setVerifySubmitting(false);
     }
   }
 
@@ -1024,6 +1126,88 @@ export default function CerneApp() {
     );
   }
 
+  // ---------- SPLASH / INTRO (só na primeira vez) ----------
+  if (showIntro && screen === 'auth') {
+    const slides = [
+      {
+        title: 'Conecte-se pelo que é real',
+        text: 'No Cerne, reações exigem um comentário de verdade. Sem curtida vazia, sem número público de seguidores.',
+      },
+      {
+        title: 'Pulses, momentos e reels',
+        text: 'Compartilhe o que você está vivendo agora — em texto, foto ou vídeo, do jeito que fizer sentido pra você.',
+      },
+      {
+        title: 'Match de verdade',
+        text: 'Conexões nascem quando duas pessoas reagem de verdade uma à outra — nada de pressão por números.',
+      },
+    ];
+    const isLast = introStep === slides.length - 1;
+    return (
+      <div className="max-w-sm mx-auto h-[700px] bg-white rounded-3xl border border-gray-200 overflow-hidden relative flex flex-col font-sans p-6">
+        <div className="flex justify-end">
+          <button onClick={finishIntro} className="text-xs text-gray-400">Pular</button>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+          <CerneMark size={56} />
+          <p className="text-lg font-medium mt-6 mb-2">{slides[introStep].title}</p>
+          <p className="text-sm text-gray-500 max-w-[260px]">{slides[introStep].text}</p>
+        </div>
+        <div className="flex justify-center gap-1.5 mb-5">
+          {slides.map((_, i) => (
+            <div key={i} className={`h-1.5 rounded-full ${i === introStep ? 'w-6 bg-rose-500' : 'w-1.5 bg-gray-200'}`} />
+          ))}
+        </div>
+        <button
+          onClick={() => (isLast ? finishIntro() : setIntroStep((s) => s + 1))}
+          className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium"
+        >
+          {isLast ? 'Começar' : 'Próximo'}
+        </button>
+      </div>
+    );
+  }
+
+  function renderTermsOverlay() {
+    if (!termsOpen) return null;
+    return (
+      <div className="absolute inset-0 bg-white flex flex-col z-50">
+        <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+          <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setTermsOpen(false)} />
+          <span className="text-sm font-medium">Termos de Uso e Privacidade</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5 text-xs text-gray-600 leading-relaxed space-y-4">
+          <p className="text-sm font-medium text-gray-800">1. Sobre o Cerne</p>
+          <p>O Cerne é uma rede social pra conexões reais, baseada em reações genuínas em vez de curtidas e seguidores públicos. Ao criar uma conta, você concorda com estes termos.</p>
+
+          <p className="text-sm font-medium text-gray-800">2. Idade mínima</p>
+          <p>O Cerne é destinado a pessoas com 18 anos ou mais. Ao se cadastrar, você confirma que tem essa idade. Contas de menores de idade serão removidas se identificadas.</p>
+
+          <p className="text-sm font-medium text-gray-800">3. Seus dados</p>
+          <p>Coletamos seu nome, e-mail, senha (criptografada), e o conteúdo que você publica (pulses, momentos, reels, comentários). Usamos isso só pra fazer o app funcionar — não vendemos seus dados pra terceiros.</p>
+
+          <p className="text-sm font-medium text-gray-800">4. Conteúdo e conduta</p>
+          <p>Você é responsável pelo que publica. Não é permitido: assédio, discurso de ódio, conteúdo sexual envolvendo menores, spam, ou se passar por outra pessoa. Contas que violarem essas regras podem ser suspensas ou banidas.</p>
+
+          <p className="text-sm font-medium text-gray-800">5. Denúncias e moderação</p>
+          <p>Você pode denunciar perfis ou conteúdo que considere inadequado. Nossa equipe analisa cada denúncia e pode remover conteúdo ou suspender contas conforme necessário.</p>
+
+          <p className="text-sm font-medium text-gray-800">6. Bloqueio</p>
+          <p>Você pode bloquear qualquer pessoa. Isso esconde o conteúdo dos dois lados e desfaz matches existentes entre vocês.</p>
+
+          <p className="text-sm font-medium text-gray-800">7. Encerramento de conta</p>
+          <p>Você pode encerrar sua conta quando quiser. Reservamos o direito de suspender contas que violem estes termos.</p>
+
+          <p className="text-sm font-medium text-gray-800">8. Mudanças nestes termos</p>
+          <p>Podemos atualizar estes termos conforme o app evolui. Mudanças relevantes serão avisadas dentro do app.</p>
+
+          <p className="text-sm font-medium text-gray-800">9. Contato</p>
+          <p>Dúvidas sobre privacidade ou estes termos? Entre em contato pelo e-mail de suporte do Cerne.</p>
+        </div>
+      </div>
+    );
+  }
+
   // ---------- AUTH (login / cadastro / esqueci a senha / redefinir) ----------
   if (screen === 'auth') {
     return (
@@ -1137,13 +1321,29 @@ export default function CerneApp() {
                   Esqueceu a senha?
                 </p>
               )}
-              {authMode === 'signup' && <div className="mb-4" />}
+              {authMode === 'signup' && (
+                <label className="flex items-start gap-2 mb-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={acceptedTerms}
+                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-xs text-gray-500">
+                    Tenho 18 anos ou mais e li e aceito os{' '}
+                    <button type="button" onClick={() => setTermsOpen(true)} className="text-blue-600 underline">
+                      Termos de Uso e a Política de Privacidade
+                    </button>
+                    .
+                  </span>
+                </label>
+              )}
 
               {authError && <p className="text-xs text-rose-600 mb-3">{authError}</p>}
 
               <button
                 type="submit"
-                disabled={authLoading}
+                disabled={authLoading || (authMode === 'signup' && !acceptedTerms)}
                 className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-3 text-sm font-medium disabled:opacity-60"
               >
                 {authLoading ? 'Conectando ao servidor...' : authMode === 'signup' ? 'Criar conta' : 'Entrar'}
@@ -1156,6 +1356,7 @@ export default function CerneApp() {
             </form>
           </>
         )}
+        {renderTermsOverlay()}
       </div>
     );
   }
@@ -1559,11 +1760,14 @@ export default function CerneApp() {
           <div>
             <div className="text-center mb-4">
               <Avatar initials={profile.name.slice(0, 2).toUpperCase() || 'EU'} intentKey={profile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
-              <input
-                value={profile.name}
-                onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
-                className="text-center text-base font-medium border-none focus:outline-none"
-              />
+              <div className="flex items-center justify-center gap-1.5">
+                <input
+                  value={profile.name}
+                  onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+                  className="text-center text-base font-medium border-none focus:outline-none"
+                />
+                {profile.verificationStatus === 'verified' && <Check className="w-4 h-4 text-blue-500 flex-shrink-0" />}
+              </div>
             </div>
 
             <div className="flex justify-around py-3 mb-4 border-t border-b border-gray-100">
@@ -2073,7 +2277,10 @@ export default function CerneApp() {
               <>
                 <div className="text-center mb-4">
                   <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-2" />
-                  <p className="text-base font-medium">{viewingProfile.name}</p>
+                  <p className="text-base font-medium flex items-center justify-center gap-1.5">
+                    {viewingProfile.name}
+                    {viewingProfile.verified && <Check className="w-4 h-4 text-blue-500" />}
+                  </p>
                   {viewingProfile.bio && <p className="text-xs text-gray-500 mt-1 max-w-[260px] mx-auto">{viewingProfile.bio}</p>}
                 </div>
 
@@ -2190,6 +2397,22 @@ export default function CerneApp() {
             <span className="text-sm font-medium">Configurações</span>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
+            <button onClick={openVerifyScreen} className="flex items-center justify-between w-full py-3 border-b border-gray-100 text-left">
+              <div>
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  Verificação de perfil
+                  {profile.verificationStatus === 'verified' && <Check className="w-4 h-4 text-blue-500" />}
+                </p>
+                <p className="text-xs text-gray-400">
+                  {profile.verificationStatus === 'verified' && 'Seu perfil está verificado'}
+                  {profile.verificationStatus === 'pending' && 'Em análise'}
+                  {profile.verificationStatus === 'rejected' && 'Não aprovada — toque pra tentar de novo'}
+                  {(profile.verificationStatus === 'none' || !profile.verificationStatus) && 'Tire uma selfie pra ganhar o selo de confiança'}
+                </p>
+              </div>
+              <ChevronLeft className="w-4 h-4 text-gray-300 rotate-180" />
+            </button>
+
             <div className="flex items-center justify-between py-3 border-b border-gray-100">
               <div>
                 <p className="text-sm font-medium">Modo invisível</p>
@@ -2202,6 +2425,10 @@ export default function CerneApp() {
                 <div className="w-5 h-5 bg-white rounded-full" />
               </button>
             </div>
+
+            <button onClick={() => setTermsOpen(true)} className="w-full text-left py-3 border-b border-gray-100 text-sm font-medium">
+              Termos de Uso e Privacidade
+            </button>
 
             <p className="text-xs text-gray-400 mt-4 mb-2">contas bloqueadas</p>
             {blockedUsers.length === 0 && <p className="text-xs text-gray-400 text-center py-6">Você não bloqueou ninguém.</p>}
@@ -2221,6 +2448,61 @@ export default function CerneApp() {
               Sair da conta
             </button>
           </div>
+        </div>
+      )}
+
+      {renderTermsOverlay()}
+
+      {verifyScreenOpen && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={closeVerifyScreen} />
+            <span className="text-sm font-medium">Verificação de perfil</span>
+          </div>
+
+          {profile.verificationStatus === 'verified' ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+              <Check className="w-10 h-10 text-blue-500 mb-3" />
+              <p className="text-sm font-medium mb-1">Perfil verificado!</p>
+              <p className="text-xs text-gray-400">As pessoas sabem que é você de verdade.</p>
+            </div>
+          ) : profile.verificationStatus === 'pending' ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+              <p className="text-sm font-medium mb-1">Em análise</p>
+              <p className="text-xs text-gray-400">Sua selfie está sendo revisada. Avisamos quando aprovar.</p>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col">
+              <div className="flex-1 relative bg-gray-900 flex items-center justify-center overflow-hidden">
+                {verifySelfiePreview ? (
+                  <img src={verifySelfiePreview} alt="" className="w-full h-full object-contain" />
+                ) : verifyCameraOn ? (
+                  <video ref={verifyVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+                ) : (
+                  <p className="text-sm text-gray-300 px-8 text-center">Não conseguimos acessar sua câmera.</p>
+                )}
+              </div>
+              {!verifySelfiePreview ? (
+                <div className="p-5 flex flex-col items-center gap-3">
+                  <p className="text-xs text-gray-400 text-center">Centralize seu rosto e toque pra tirar a selfie.</p>
+                  <button onClick={captureVerifySelfie} className="w-16 h-16 rounded-full border-4 border-gray-800" aria-label="Tirar selfie" />
+                </div>
+              ) : (
+                <div className="p-4 flex gap-2">
+                  <button onClick={retakeVerifySelfie} className="flex-1 border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
+                    Refazer
+                  </button>
+                  <button
+                    onClick={submitVerification}
+                    disabled={verifyUploading || verifySubmitting || !verifySelfieUrl}
+                    className="flex-1 bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-2.5 text-sm font-medium disabled:opacity-50"
+                  >
+                    {verifyUploading ? 'Enviando...' : verifySubmitting ? 'Confirmando...' : 'Enviar pra análise'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
