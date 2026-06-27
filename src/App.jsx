@@ -273,7 +273,7 @@ export default function CerneApp() {
           author: p.author.name,
           authorId: p.authorId,
           authorAvatarUrl: p.author.avatarUrl,
-          authorVerified: p.author.verified,
+          authorVerified: p.author.verificationStatus === 'verified',
           intentKey: p.author.intent,
           time: timeAgo(p.createdAt),
           text: p.text,
@@ -282,8 +282,8 @@ export default function CerneApp() {
           mediaUrl: p.mediaUrl,
           mediaType: p.mediaType || 'image',
           comments: [
-            ...p.reactions.map((r) => ({ key: `r-${r.userId}`, commentId: null, userId: r.userId, name: r.user.name, intentKey: r.user.intent, avatarUrl: r.user.avatarUrl, verified: r.user.verified, text: r.comment, createdAt: r.createdAt, likedByMe: false })),
-            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, avatarUrl: c.user.avatarUrl, verified: c.user.verified, text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid), likeCount: c.likes.length })),
+            ...p.reactions.map((r) => ({ key: `r-${r.userId}`, commentId: null, userId: r.userId, name: r.user.name, intentKey: r.user.intent, avatarUrl: r.user.avatarUrl, verified: r.user.verificationStatus === 'verified', text: r.comment, createdAt: r.createdAt, likedByMe: false })),
+            ...p.comments.map((c) => ({ key: `c-${c.id}`, commentId: c.id, userId: c.userId, name: c.user.name, intentKey: c.user.intent, avatarUrl: c.user.avatarUrl, verified: c.user.verificationStatus === 'verified', text: c.text, createdAt: c.createdAt, likedByMe: c.likes.some((l) => l.userId === uid), likeCount: c.likes.length })),
           ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
           likedByMe: p.likes.some((l) => l.userId === uid),
           likeCount: p.likes.length,
@@ -326,7 +326,7 @@ export default function CerneApp() {
             name: other.name,
             intentKey: other.intent || 'ambos',
             avatarUrl: other.avatarUrl,
-            verified: other.verified,
+            verified: other.verificationStatus === 'verified',
             lastMessage: m.messages[0]?.text || 'vocês deram match. diga olá!',
           };
         })
@@ -1707,7 +1707,10 @@ export default function CerneApp() {
                             </div>
                           )}
                         </div>
-                        <p className="text-[11px] mt-1">{g.authorName}</p>
+                        <p className="text-[11px] mt-1 flex items-center justify-center gap-0.5">
+                          {g.authorName}
+                          {g.authorVerified && <VerifiedBadge size={10} />}
+                        </p>
                       </button>
                     ))}
                   </>
@@ -2353,7 +2356,7 @@ export default function CerneApp() {
                   <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-2" avatarUrl={viewingProfile.avatarUrl} />
                   <p className="text-base font-medium flex items-center justify-center gap-1.5">
                     {viewingProfile.name}
-                    {viewingProfile.verified && <VerifiedBadge size={16} animated />}
+                    {viewingProfile.verificationStatus === 'verified' && <VerifiedBadge size={16} animated />}
                   </p>
                   {viewingProfile.bio && <p className="text-xs text-gray-500 mt-1 max-w-[260px] mx-auto">{viewingProfile.bio}</p>}
                 </div>
