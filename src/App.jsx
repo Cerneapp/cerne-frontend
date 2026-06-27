@@ -180,6 +180,7 @@ export default function CerneApp() {
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [confirmUnblockOpen, setConfirmUnblockOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blockedUsers, setBlockedUsers] = useState([]);
@@ -2051,6 +2052,23 @@ export default function CerneApp() {
           <div className="flex-1 overflow-y-auto p-4">
             {viewingProfileLoading ? (
               <p className="text-xs text-gray-400 text-center py-10">Carregando perfil...</p>
+            ) : viewingProfile.isBlockedByMe || viewingProfile.blockedMe ? (
+              <div className="text-center pt-8">
+                <Avatar initials={viewingProfile.name.slice(0, 2).toUpperCase()} intentKey={viewingProfile.intent} size="w-16 h-16 text-lg mx-auto mb-3" />
+                <p className="text-base font-medium mb-2">{viewingProfile.name}</p>
+                {viewingProfile.isBlockedByMe ? (
+                  <>
+                    <p className="text-xs text-gray-400 mb-6 max-w-[240px] mx-auto">
+                      Você bloqueou essa pessoa. Pulses, reels e momentos dela ficam escondidos pra você, e os seus ficam escondidos pra ela.
+                    </p>
+                    <button onClick={() => setConfirmUnblockOpen(true)} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-8 py-2.5 text-sm font-medium">
+                      Desbloquear
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-400 max-w-[240px] mx-auto">Esse perfil não está disponível.</p>
+                )}
+              </div>
             ) : (
               <>
                 <div className="text-center mb-4">
@@ -2104,12 +2122,31 @@ export default function CerneApp() {
         </div>
       )}
 
+      {confirmUnblockOpen && viewingProfile && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setConfirmUnblockOpen(false)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <p className="text-sm font-medium mb-1 text-center">Desbloquear {viewingProfile.name}?</p>
+            <p className="text-xs text-gray-500 text-center mb-4">Vocês vão poder ver o conteúdo um do outro de novo.</p>
+            <button
+              onClick={() => { unblockUser(viewingProfile.id); setConfirmUnblockOpen(false); }}
+              className="w-full bg-blue-50 border border-blue-300 text-blue-700 rounded-lg py-2.5 text-sm font-medium mb-2"
+            >
+              Desbloquear
+            </button>
+            <button onClick={() => setConfirmUnblockOpen(false)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {profileMenuOpen && viewingProfile && (
         <div className="absolute inset-0 flex items-end justify-center" onClick={() => setProfileMenuOpen(false)}>
           <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
             <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
             {viewingProfile.isBlockedByMe ? (
-              <button onClick={() => { unblockUser(viewingProfile.id); setProfileMenuOpen(false); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
+              <button onClick={() => { setProfileMenuOpen(false); setConfirmUnblockOpen(true); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left border-b border-gray-100">
                 <X className="w-[18px] h-[18px]" /> Desbloquear {viewingProfile.name}
               </button>
             ) : (
