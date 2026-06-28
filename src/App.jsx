@@ -217,6 +217,17 @@ export default function CerneApp() {
   const [confirmUnblockOpen, setConfirmUnblockOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [pulseMenuTarget, setPulseMenuTarget] = useState(null);
+  const [editingPulse, setEditingPulse] = useState(null);
+  const [editPulseText, setEditPulseText] = useState('');
+  const [editPulseTags, setEditPulseTags] = useState([]);
+  const [reportPulseTarget, setReportPulseTarget] = useState(null);
   const [blockedUsers, setBlockedUsers] = useState([]);
   const [interests, setInterests] = useState([]);
 
@@ -255,7 +266,7 @@ export default function CerneApp() {
         avatarUrl: user.avatarUrl || null,
       });
       setScreen('app');
-      await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests()]);
+      await Promise.all([loadFeed(uid, tok), loadConversations(uid, tok), loadStories(uid, tok), loadInterests(), loadNotifications(uid, tok)]);
     } catch (err) {
       localStorage.removeItem('cerne_token');
       localStorage.removeItem('cerne_userId');
@@ -313,6 +324,46 @@ export default function CerneApp() {
       // explorar fica vazio se falhar, sem quebrar o app
     }
   }
+
+  async function loadNotifications(uid = userId, tok = token) {
+    try {
+      const raw = await apiFetch(`/notifications?userId=${uid}`, {}, tok);
+      setNotifications(raw);
+      setUnreadCount(raw.filter((n) => !n.read).length);
+    } catch (err) {
+      // sininho fica vazio se falhar, sem quebrar o app
+    }
+  }
+
+  async function openNotifications() {
+    setNotificationsOpen(true);
+    await loadNotifications();
+    try {
+      await apiFetch('/notifications/mark-read', { method: 'POST', body: JSON.stringify({ userId }) }, token);
+      setUnreadCount(0);
+    } catch (err) {
+      // não bloqueia a visualização se a marcação falhar
+    }
+  }
+
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const raw = await apiFetch(`/users/search?q=${encodeURIComponent(searchQuery.trim())}&viewerId=${userId}`, {}, token);
+        setSearchResults(raw);
+      } catch (err) {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchQuery, userId, token]);
 
   async function loadConversations(uid = userId, tok = token) {
     try {
@@ -1109,9 +1160,44 @@ export default function CerneApp() {
     try {
       await apiFetch(`/pulses/${id}?userId=${userId}`, { method: 'DELETE' }, token);
       setPulses((prev) => prev.filter((p) => p.id !== id));
+      setPulseMenuTarget(null);
       showToast('Pulse apagado.');
     } catch (err) {
       setFeedError(`Não foi possível apagar o pulse: ${err.message}`);
+    }
+  }
+
+  function openEditPulse(pulse) {
+    setEditingPulse(pulse);
+    setEditPulseText(pulse.text);
+    setEditPulseTags(pulse.tags);
+    setPulseMenuTarget(null);
+  }
+
+  async function saveEditPulse() {
+    if (!editingPulse) return;
+    try {
+      await apiFetch(
+        `/pulses/${editingPulse.id}`,
+        { method: 'PATCH', body: JSON.stringify({ userId, text: editPulseText, tagNames: editPulseTags }) },
+        token
+      );
+      setPulses((prev) => prev.map((p) => (p.id === editingPulse.id ? { ...p, text: editPulseText, tags: editPulseTags } : p)));
+      setEditingPulse(null);
+      showToast('Pulse atualizado!');
+    } catch (err) {
+      setFeedError('Não foi possível editar o pulse: ' + err.message);
+    }
+  }
+
+  async function submitContentReport(pulse, reason) {
+    try {
+      await apiFetch(`/pulses/${pulse.id}/report`, { method: 'POST', body: JSON.stringify({ reporterId: userId, reason }) }, token);
+      setReportPulseTarget(null);
+      setPulseMenuTarget(null);
+      showToast('Denúncia enviada.');
+    } catch (err) {
+      setFeedError('Não foi possível denunciar: ' + err.message);
     }
   }
 
@@ -1513,9 +1599,12 @@ export default function CerneApp() {
             <p className="text-xs text-gray-500">{pulse.time}</p>
           </button>
           {pulse.own ? (
-            <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => removeOwnPulse(pulse.id)} />
+            <MoreVertical className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => setPulseMenuTarget(pulse)} />
           ) : (
-            <span className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}>{INTENT_LABEL[pulse.intentKey] || 'aberto a ambos'}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className={`text-xs px-2 py-0.5 rounded-md ${s.bg} ${s.text}`}>{INTENT_LABEL[pulse.intentKey] || 'aberto a ambos'}</span>
+              <MoreVertical className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => setPulseMenuTarget(pulse)} />
+            </div>
           )}
         </div>
 
@@ -1639,8 +1728,13 @@ export default function CerneApp() {
                 <span className="text-lg font-medium text-rose-600">Cerne</span>
               </div>
               <div className="flex gap-3 text-gray-400">
-                <Search className="w-[18px] h-[18px]" />
-                <Bell className="w-[18px] h-[18px]" />
+                <Search className="w-[18px] h-[18px] cursor-pointer" onClick={() => setTab('explore')} />
+                <button className="relative" onClick={openNotifications}>
+                  <Bell className="w-[18px] h-[18px]" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full" />
+                  )}
+                </button>
               </div>
             </>
           )}
@@ -1740,31 +1834,57 @@ export default function CerneApp() {
         {tab === 'explore' && (
           <div>
             <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-4">
-              <Search className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-400">Buscar interesses, pessoas...</span>
+              <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar pessoas pelo nome..."
+                className="text-sm bg-transparent flex-1 focus:outline-none"
+              />
             </div>
-            <p className="text-xs text-gray-400 mb-2">comunidades com mais pulses</p>
-            {interests.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-8">Ainda não tem pulses com tags suficientes pra formar uma comunidade.</p>
-            )}
-            <div className="flex flex-col gap-2">
-              {interests.map((c, i) => {
-                const styleKeys = ['blue', 'emerald', 'amber', 'rose'];
-                const s = COMMUNITY_STYLES[styleKeys[i % styleKeys.length]];
-                return (
-                  <button key={c.name} onClick={() => setExploreMsg(`Em breve: feed dedicado a #${c.name}`)} className="flex items-center gap-3 border border-gray-200 rounded-xl p-3 text-left">
-                    <div className={`w-9 h-9 rounded-full ${s.bg} ${s.text} flex items-center justify-center`}>
-                      <Users className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.pulseCount} {c.pulseCount === 1 ? 'pulse' : 'pulses'}</p>
-                    </div>
+
+            {searchQuery.trim().length >= 2 ? (
+              <div className="flex flex-col gap-1">
+                {searching && <p className="text-xs text-gray-400 text-center py-6">Buscando...</p>}
+                {!searching && searchResults.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-6">Nenhuma pessoa encontrada com esse nome.</p>
+                )}
+                {searchResults.map((u) => (
+                  <button key={u.id} onClick={() => openProfile(u.id)} className="flex items-center gap-3 py-2.5 border-b border-gray-100 text-left w-full">
+                    <Avatar initials={u.name.slice(0, 2).toUpperCase()} intentKey={u.intent} avatarUrl={u.avatarUrl} />
+                    <span className="text-sm flex items-center gap-1">
+                      {u.name}
+                      {u.verificationStatus === 'verified' && <VerifiedBadge size={12} />}
+                    </span>
                   </button>
-                );
-              })}
-            </div>
-            {exploreMsg && <p className="text-xs text-blue-600 mt-3">{exploreMsg}</p>}
+                ))}
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-400 mb-2">comunidades com mais pulses</p>
+                {interests.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-8">Ainda não tem pulses com tags suficientes pra formar uma comunidade.</p>
+                )}
+                <div className="flex flex-col gap-2">
+                  {interests.map((c, i) => {
+                    const styleKeys = ['blue', 'emerald', 'amber', 'rose'];
+                    const s = COMMUNITY_STYLES[styleKeys[i % styleKeys.length]];
+                    return (
+                      <button key={c.name} onClick={() => setExploreMsg(`Em breve: feed dedicado a #${c.name}`)} className="flex items-center gap-3 border border-gray-200 rounded-xl p-3 text-left">
+                        <div className={`w-9 h-9 rounded-full ${s.bg} ${s.text} flex items-center justify-center`}>
+                          <Users className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{c.name}</p>
+                          <p className="text-xs text-gray-400">{c.pulseCount} {c.pulseCount === 1 ? 'pulse' : 'pulses'}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {exploreMsg && <p className="text-xs text-blue-600 mt-3">{exploreMsg}</p>}
+              </>
+            )}
           </div>
         )}
 
@@ -2462,6 +2582,114 @@ export default function CerneApp() {
             <button onClick={() => setReportTarget(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
               Cancelar
             </button>
+          </div>
+        </div>
+      )}
+
+      {pulseMenuTarget && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setPulseMenuTarget(null)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            {pulseMenuTarget.own ? (
+              <>
+                <button onClick={() => openEditPulse(pulseMenuTarget)} className="flex items-center gap-3 py-3 text-sm w-full text-left border-b border-gray-100">
+                  <Camera className="w-[18px] h-[18px] text-gray-600" /> Editar pulse
+                </button>
+                <button onClick={() => removeOwnPulse(pulseMenuTarget.id)} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left">
+                  <Trash2 className="w-[18px] h-[18px]" /> Apagar pulse
+                </button>
+              </>
+            ) : (
+              <button onClick={() => { setReportPulseTarget(pulseMenuTarget); setPulseMenuTarget(null); }} className="flex items-center gap-3 py-3 text-sm text-rose-600 w-full text-left">
+                <Eye className="w-[18px] h-[18px]" /> Denunciar esse pulse
+              </button>
+            )}
+            <button onClick={() => setPulseMenuTarget(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium mt-3">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {reportPulseTarget && (
+        <div className="absolute inset-0 flex items-end justify-center" onClick={() => setReportPulseTarget(null)}>
+          <div className="bg-white rounded-t-2xl p-5 w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <p className="text-sm font-medium mb-3">Por que você está denunciando esse pulse?</p>
+            <div className="flex flex-col gap-1 mb-3">
+              {['Comportamento inadequado', 'Conteúdo inadequado', 'Spam', 'Outro'].map((reason) => (
+                <button key={reason} onClick={() => submitContentReport(reportPulseTarget, reason)} className="py-2.5 text-sm text-left border-b border-gray-100 last:border-b-0">
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setReportPulseTarget(null)} className="w-full border border-gray-200 text-gray-500 rounded-lg py-2.5 text-sm font-medium">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editingPulse && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-gray-100">
+            <X className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setEditingPulse(null)} />
+            <span className="text-sm font-medium">Editar pulse</span>
+            <button onClick={saveEditPulse} className="bg-blue-50 border border-blue-300 text-blue-700 rounded-lg px-3 py-1 text-xs font-medium">
+              Salvar
+            </button>
+          </div>
+          <div className="flex-1 p-5">
+            <textarea
+              autoFocus
+              value={editPulseText}
+              onChange={(e) => setEditPulseText(e.target.value)}
+              rows={4}
+              className="w-full border-none focus:outline-none text-sm mb-4 resize-none"
+            />
+            <div className="flex gap-2 flex-wrap">
+              {SUGGESTED_TAGS.map((tag) => (
+                <Chip
+                  key={tag}
+                  label={`#${tag}`}
+                  selected={editPulseTags.includes(tag)}
+                  onClick={() => setEditPulseTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notificationsOpen && (
+        <div className="absolute inset-0 bg-white flex flex-col">
+          <div className="flex items-center gap-3 p-4 border-b border-gray-100">
+            <ChevronLeft className="w-5 h-5 text-gray-500 cursor-pointer" onClick={() => setNotificationsOpen(false)} />
+            <span className="text-sm font-medium">Notificações</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            {notifications.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-10">Nenhuma notificação ainda.</p>
+            )}
+            <div className="flex flex-col gap-1">
+              {notifications.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => {
+                    const p = pulses.find((x) => x.id === n.relatedPulseId);
+                    if (p) openPulseDetail(p);
+                    setNotificationsOpen(false);
+                  }}
+                  className="flex items-start gap-3 py-3 border-b border-gray-100 text-left w-full"
+                >
+                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? 'bg-transparent' : 'bg-rose-500'}`} />
+                  <div className="flex-1">
+                    <p className="text-sm">{n.text}</p>
+                    <p className="text-xs text-gray-400">{timeAgo(n.createdAt)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
